@@ -1,0 +1,194 @@
+/**
+ * Created by adamsm on 1/25/2019.
+ */
+({
+    /*
+        Usage:
+
+        string strThis = '{param1: "this value", param2: "another value"}';
+
+        helper.doCallout(component, helper, controllerMethod, strThis).then(function(response) {
+            // Success Path
+            helper.showMessage('Message', 'Success, result = ' + response, false);
+        }).catch(function(errors) {
+            // Failure Path
+            helper.showMessage('Error', errors[0].message, true);
+        });
+    */
+
+    doCallout: function (component, helper, method, params) {
+        try {
+            var strParams = '';
+
+            if (params) {
+                for (var key in params) {
+                    strParams += key + '=' + params[key] + ', ';
+                }
+            }
+
+            helper.showConsole(component, 'doCallout called, method = ' + method + ', params: ' + strParams);
+
+            return new Promise($A.getCallback(function (resolve, reject) {
+                // Set action and param
+                var action = component.get(method);
+
+                if (params != null) {
+                    action.setParams(params);
+                }
+
+                // Callback
+                action.setCallback(component, function (response) {
+                    var state = response.getState();
+
+                    helper.showConsole(component, 'doCallout response.state = ' + state);
+
+                    if (component.isValid() && state === "SUCCESS") {
+                        helper.showConsole(component, 'doCallout response.getReturnValue = ' + response.getReturnValue());
+
+                        resolve(response.getReturnValue());
+                    }
+                    else {
+                        helper.showConsole(component, 'doCallout error');
+
+                        var errors = response.getError();
+
+                        if (errors) {
+                            if (errors[0]) {
+                                helper.showConsole(component, 'doCallout error = ' + errors[0].message);
+                            }
+                            else {
+                                helper.showConsole(component, 'doCallout error = ' + errors);
+                            }
+                        }
+
+                        reject(errors);
+                    }
+                });
+
+                $A.enqueueAction(action);
+            }));
+        }
+        catch (ex) {
+            console.log('ACT_CommunityBase.doCallout error = ' + ex.getMessage());
+        }
+    },
+
+    getUrlParameter: function getUrlParameter(sParam) {
+        try {
+            var sPageURL = decodeURIComponent(window.location.search.substring(1)),
+                sURLVariables = sPageURL.split('&'),
+                sParameterName,
+                i;
+
+            for (i = 0; i < sURLVariables.length; i++) {
+                sParameterName = sURLVariables[i].split('=');
+
+                if (sParameterName[0] === sParam) {
+                    return sParameterName[1] === undefined ? true : sParameterName[1];
+                }
+            }
+
+            return null;
+        }
+        catch (ex) {
+            console.log('ACT_CommunityBase.getUrlParameter error = ' + ex.getMessage());
+        }
+    },
+
+    gotoSObject: function (component, helper, sobjectId) {
+        try {
+            helper.showConsole(component, 'gotoSObject - ' + sobjectId);
+
+            var urlEvent = $A.get("e.force:navigateToSObject");
+
+            urlEvent.setParams({
+                "recordId": sobjectId
+            });
+
+            urlEvent.fire();
+        }
+        catch (ex) {
+            console.log('ACT_CommunityBase.gotoSObject error = ' + ex.getMessage());
+        }
+    },
+
+    gotoUrl: function (component, helper, url) {
+        try {
+            helper.showConsole(component, 'gotoURL - ' + url);
+
+            var urlEvent = $A.get("e.force:navigateToURL");
+
+            urlEvent.setParams({
+                "url": url
+            });
+
+            urlEvent.fire();
+        }
+        catch (ex) {
+            console.log('ACT_CommunityBase.gotoUrl error = ' + ex.getMessage());
+        }
+    },
+
+    gotoURLPopup: function (component, helper, url, windowName) {
+        helper.showConsole(component, 'gotoURLPopup - ' + url);
+
+        try {
+            var win = window.open(url, windowName);
+
+            if (win == null) {
+                helper.showMessage('error', 'Please disable the popup blocker for this site and try launching again.', true);
+            }
+        }
+        catch (ex) {
+            console.log('ACT_CommunityBase.gotoUrl error = ' + ex.getMessage());
+
+            helper.showMessage('error', 'Please make sure all similar windows are closed before launching again.', true);
+        }
+    },
+
+    showConsole: function(component, message) {
+        try {
+            if (component.get('v.consoleDebug')) {
+                console.log(message);
+            }
+        }
+        catch (ex) {
+            console.log('ACT_CommunityBase.showConsole error = ' + ex.getMessage());
+        }
+    },
+
+    showErrors: function(helper, errors) {
+        if (errors) {
+            if (errors.length) {
+                helper.showMessage('error', errors[0].message, true);
+            }
+            else {
+                helper.showMessage('error', errors.message, true);
+            }
+        }
+    },
+
+    showMessage: function(level, message, sticky) {
+        try {
+            level = level.toLowerCase();
+
+            // Log the message
+            if (message) {
+                var strMode = sticky ? 'sticky' : 'dismissible';
+                var toastEvent = $A.get("e.force:showToast");
+
+                toastEvent.setParams({
+                    mode : strMode,
+                    "title" : level === "error" ? "Error" : "Message",
+                    "message" : message,
+                    "type" : level
+                });
+
+                toastEvent.fire();
+            }
+        }
+        catch (ex) {
+            console.log('ACT_CommunityBase.showMessage error = ' + ex.getMessage());
+        }
+    },
+})
