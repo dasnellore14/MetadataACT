@@ -1,0 +1,158 @@
+<!--
+ - Created by craighoneyfield on 12/4/18.
+ -->
+
+<aura:component controller="ACT_OLRDashboardPage"
+                description="ACT_OLRDashboard"
+                extends="c:ACT_CommunityBase"
+                implements="force:appHostable,flexipage:availableForAllPageTypes,forceCommunity:availableForAllPageTypes"
+                access="global" >
+
+    <!-- Internal Attributes -->
+    <aura:attribute name="gordonResults" type="Object" />
+    <aura:attribute name="HierarchyApprovalsList" type="SObject[]" />
+    <aura:attribute name="showEdFiAdmin" type="Boolean" default="false"/>
+    <aura:attribute name="showeMetrics" type="Boolean" default="false"/>
+    <aura:attribute name="showInviteUsers" type="Boolean" default="false"/>
+    <aura:attribute name="showManageMyAccess" type="boolean" default="false"/>
+    <aura:attribute name="showManageUsers" type="Boolean" default="false"/>
+    <aura:attribute name="showModalDialog" type="Boolean" default="false" />
+    <aura:attribute name="showPANext" type="boolean" default="false"/>
+    <aura:attribute name="showProgramTypeModal" type="Boolean" default="false"/>
+    <aura:attribute name="showTestAccomodations" type="Boolean" default="false"/>
+
+    <!-- Design Attributes -->
+    <aura:attribute name="ACTCustomerServicePhone" type="string" />
+    <aura:attribute name="EdFiURL" type="string" />
+    <aura:attribute name="eMetricsURL" type="string" />
+    <aura:attribute name="testAccomodationsURL" type="string" />
+
+    <!-- Do Init -->
+    <aura:handler name="init" value="{!this}" action="{!c.doInit}" />
+
+    <aura:if isTrue="{!v.showModalDialog == true}" >
+        <c:ACT_ModalDialog showModalDialog="true" HierarchyApprovalsList="{!v.HierarchyApprovalsList}" />
+    </aura:if>
+
+    <aura:if isTrue="{!v.showProgramTypeModal == true}" >
+        <c:ACT_ProgramTypeModalDialog showModalDialog="{!v.showProgramTypeModal}" gordonResults="{!v.gordonResults}" eMetricsURL="{!v.eMetricsURL}"/>
+    </aura:if>
+
+    <!-- Component Body -->
+    <section title="Helpful Tools">
+        <lightning:spinner aura:id="idSpinner" variant="brand" size="medium" class="slds-hide"/>
+
+        <b><h1 style="color:#000000; font-size:24px;">Helpful Tools</h1></b>
+
+        <div class="slds-p-top_large" />
+
+        <aura:if isTrue="{!v.showeMetrics}">
+            <div class="slds-box slds-m-around slds-size--1-of-1" style="background-color:#0077AA">
+                <div class="slds-grid" >
+                    <div class="slds-col slds-size--1-of-8">
+                        <!--lightning:icon alternativeText="View ACT Test Scores and Reports" class="lightIcon" aura:id="icn1" iconName="standard:lightning_usage" size="large"/-->
+                        <ltng:require styles="/resource/IcomoonFont/style.css"/>
+                        <span class="icon-stats-dots" style="color:white; font-size:45px;"></span>
+                    </div>
+                    <div class="slds-col slds-m-left_large slds-size--7-of-8 slds-align-middle">
+                        <a href="" onclick="{!c.navViewScores}" > <p style="color: white "><b>ACT Test Scores and Reports</b></p></a>
+                    </div>
+                </div>
+            </div>
+        </aura:if>
+        &nbsp;
+
+        <aura:if isTrue="{!v.showPANext}">
+            <div class="slds-box slds-m-around slds-size--1-of-1" style="background-color:#0077AA">
+                <div class="slds-grid" >
+                    <div class="slds-col slds-size--1-of-8">
+                        <!--<lightning:icon class="lightIcon" aura:id="icn5" iconName="standard:product_request" size="large"/-->
+                        <ltng:require styles="/resource/IcomoonFont/style.css"/>
+                        <span class="icon-pie-chart" style="color:white; font-size:45px;"></span>
+                    </div>
+                    <div class="slds-col slds-m-left_large slds-size--7-of-8 slds-align-middle">
+                        <a  href="" onclick="{!c.PANext}"><p style="color: white"><b>PearsonAccess </b><sup>next</sup></p></a>
+                    </div>
+                </div>
+            </div>
+        </aura:if>
+        &nbsp;
+        <aura:if isTrue="{!v.showEdFiAdmin}">
+            &nbsp;
+            <div class="slds-box slds-m-around slds-size--1-of-1" style="background-color:#0077AA" >
+                <div class="slds-grid" >
+                    <div class="slds-col slds-size--1-of-8">
+                        <!--lightning:icon alternativeText="Ed-Fi" class="lightIcon" aura:id="icn7" iconName="standard:lightning_usage" size="large"/-->
+                        <ltng:require styles="/resource/IcomoonFont/style.css"/>
+                        <span class="icon-wrench" style="color:white; font-size:45px;" ></span>
+                    </div>
+                    <div class="slds-col slds-m-left_large slds-size---of-8 slds-align-middle">
+                        <a href="" onclick="{!c.navConfigureEdFi}"><p style="color: white"><b>Manage Ed-Fi Exchange</b></p></a>
+                    </div>
+                </div>
+            </div>
+        </aura:if>
+        &nbsp;
+        <!--Test Accomodations/TAA Section.-->
+        <aura:if isTrue="{!v.showTestAccomodations}">
+            <div class="slds-box slds-m-around slds-size--1-of-1" style="background-color:#0077AA">
+                <div class="slds-grid" >
+                    <div class="slds-col slds-size--1-of-8">
+                        <ltng:require styles="/resource/IcomoonFont/style.css"/>
+                        <span class="icon-accessibility" style="color:white; font-size:45px;"></span>
+                    </div>
+                    <div class="slds-col slds-m-left_large slds-size--7-of-8 slds-align-middle">
+                        <a  href="" onclick="{!c.navConfigureTAA}"><p style="color: white"><b>Test Accessibility and Accommodations</b></p></a>
+                    </div>
+                </div>
+            </div>
+        </aura:if>
+        &nbsp;
+        <aura:if isTrue="{!v.showInviteUsers}">
+            <div class="slds-box slds-m-around slds-size--1-of-1">
+                <div class="slds-grid" >
+                    <div class="slds-col slds-size--1-of-8">
+                        <!--lightning:icon alternativeText="Add User(s)" class="lightIcon" aura:id="icn4" iconName="custom:custom67" size="large"/-->
+                        <ltng:require styles="/resource/IcomoonFont/style.css"/>
+                        <span class="icon-user-plus" style="color:#0077AA; font-size:45px;"></span>
+                    </div>
+                    <div class="slds-col slds-m-left_large slds-size--7-of-8 slds-align-middle">
+                        <a  href="" onclick="{!c.navAddUsers}"><b>Invite New Users</b></a>
+                    </div>
+                </div>
+            </div>
+        </aura:if>
+        &nbsp;&nbsp;
+        <aura:if isTrue="{!v.showManageUsers}">
+            <div class="slds-box slds-m-around slds-size--1-of-1" >
+                <div class="slds-grid" >
+                    <div class="slds-col slds-size--1-of-8">
+                        <!--lightning:icon class="lightIcon" alternativeText="Manage Existing User Accounts and Access" aura:id="icn2" iconName="standard:user_role" size="large"/-->
+                        <ltng:require styles="/resource/IcomoonFont/style.css"/>
+                        <span class="icon-users" style="color:#0077AA; font-size:45px;"></span>
+                    </div>
+                    <div class="slds-col slds-m-left_large slds-size--7-of-8 slds-align-middle">
+                        <a   href="" onclick="{!c.navManageAccess}"><b>Manage Users</b></a>
+                    </div>
+                </div>
+            </div>
+        </aura:if>
+        &nbsp;
+        <aura:if isTrue="{!v.showManageMyAccess}">
+            <div class="slds-box slds-m-around slds-size--1-of-1">
+                <div class="slds-grid" >
+                    <div class="slds-col slds-size--1-of-8">
+                        <!--lightning:icon alternativeText="Add User(s)" class="lightIcon" aura:id="icn4" iconName="custom:custom67" size="large"/-->
+                        <ltng:require styles="/resource/icoMoonTransfer/style.css"/>
+                        <span class="icon-transfer" style="color:#0077AA; font-size:45px;"></span>
+                    </div>
+                    <div class="slds-col slds-m-left_large slds-size--7-of-8 slds-align-middle">
+                        <a  href="" onclick="{!c.navMyAccess}"><b>Manage My Access</b></a>
+                    </div>
+                </div>
+            </div>
+        </aura:if>
+
+    </section>
+    <div class="slds-p-top_medium"></div>
+</aura:component>
