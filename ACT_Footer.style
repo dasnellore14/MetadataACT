@@ -1,0 +1,87 @@
+/**
+ * Created by adamsm on 1/13/2019.
+ */
+@media t(mqSmall) {
+    .THIS .nonEssential {
+        display: none;
+    }
+}
+
+.THIS {
+}
+
+.THIS .divMiddle {
+    border-left: 1px solid rgb(53,97,134);
+    border-right: 1px solid rgb(53,97,134);
+}
+
+.THIS .hrThinLine {
+    border-top: 1px solid rgb(53,97,134);
+}
+
+.THIS .linkLarge {
+    color: #86DBF9;
+    font-family : "Montserrat";
+    font-size: 1.125em;
+    font-weight: normal;
+    text-decoration: none;
+}
+
+.THIS .linkMedium {
+    color: #86DBF9;
+    font-family : "Montserrat";
+    font-size: 1.25em;
+    font-weight: normal;
+    text-decoration: underline;
+}
+
+.THIS .linkSmall {
+    color: #86DBF9;
+    font-family : "Montserrat";
+    font-size: 1.125em;
+    font-weight: normal;
+    text-decoration: none;
+}
+
+.THIS .linkTiny {
+    color: #86DBF9;
+    font-family : "Montserrat";
+    font-size: .875em;
+    font-weight: normal;
+    text-decoration: none;
+}
+
+.THIS .linkTinyUnderline {
+    color: #86DBF9;
+    font-family : "Montserrat";
+    font-size: .875em;
+    font-weight: normal;
+    text-decoration: underline;
+}
+
+.THIS .txtNeedHelp {
+    font-family : "Montserrat";
+    font-size: 1.5em;
+    font-weight: bold;
+    text-decoration: none;
+}
+
+.THIS .txtSeeFAQ {
+    font-family : "Montserrat";
+    font-size: 1.25em;
+    font-weight: normal;
+    text-decoration: none;
+}
+
+.THIS .textTinyGrey {
+    color: #CCCCCC;
+    font-family : "Montserrat";
+    font-size: .875em;
+    font-weight: normal;
+    text-decoration: none;
+}
+
+.THIS .divOuter {
+    background: linear-gradient(180deg, rgba(0, 82, 116, 1) 0%, rgba(0, 82, 116, 1) 0%, rgba(4, 46, 96, 1) 100%, rgba(4, 46, 96, 1) 100%);
+    color: white;
+}
