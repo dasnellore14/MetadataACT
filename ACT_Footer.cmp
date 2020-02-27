@@ -1,0 +1,296 @@
+<!--
+ - Created by adamsm on 1/14/2019.
+ -->
+
+<aura:component description="ACT_Footer"
+                controller="ACT_FooterController"
+                extends="c:Peak_Base"
+                implements="force:appHostable,flexipage:availableForAllPageTypes,forceCommunity:availableForAllPageTypes"
+                access="global" >
+
+    <!-- Internal Attributes -->
+    <aura:attribute name="userId" type="string"/>
+
+    <!-- Design Variables -->
+    <aura:attribute name="ACTHours" type="string" default="Hours Placeholder"/>
+    <aura:attribute name="ACTPhoneNumber" type="string" default="Phone Number Placeholder"/>
+
+    <!-- Do Init -->
+    <aura:handler name="init" value="{!this}" action="{!c.doInit}" />
+
+    <!-- Component Markup -->
+    <section>
+        <div class="divOuter">
+            <!-- Spacer Top -->
+            <div class="slds-grid slds-wrap">
+                &nbsp;
+            </div>
+
+            <!-- Outer Grid Mobile Size -->
+            <div class="slds-grid slds-grid_align-spread slds-hide--medium">
+                <div class="slds-col slds-size_12-of-12">
+                    <!-- Inner Grid Top -->
+                    <div class="slds-grid">
+
+
+                        <div class="slds-col slds-size_12-of-12 ">
+                            <!-- Middle Grid -->
+
+                            <div class="slds-grid slds-grid_vertical slds-align_absolute-center">
+                                <div class="slds-col">
+                                    <a href="javascript:void(0)" onclick="{!c.handleLogoClick}" class="linkSmall">
+                                        <img alt="Go to ACT.org" src="{!$Resource.ACT_Logo_White}" width="100"/>
+                                        <div class="slds-m-vertical--small"></div>
+                                    </a>
+                                </div>
+
+                                <div class="slds-col">
+                                    <span class="txtNeedHelp">
+                                        Need help?
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="slds-col slds-text-align_center slds-size_12-of-12 ">
+
+                                <!--ui:outputText value="See "/>
+                                <a alt="Go to ACT email information" href="javascript:void(0)" onclick="{!c.handleEmailUsClick}" class="linkMedium">
+                                    <ui:outputText value="FAQs"/>
+                                </a-->
+                                <a alt="Go to ACT email information" href="javascript:void(0)" onclick="{!c.handleEmailUsClick}" class="linkMedium">
+                                    <ui:outputText value="Email us"/>
+                                </a>
+                                <span class="txtSeeFAQ">
+                                       <!-- <ui:outputText value=", or call "/>
+                                         <a alt="Call ACT"  href="javascript:void(0)" class="linkMedium">
+                                        <ui:outputText value="+1 800 525 6932,"/>
+                                    </a>-->
+                                        <ui:outputText value=", or call "/>
+                                        <a alt="Call ACT"  href="javascript:void(0)" class="linkMedium">
+                                        <ui:outputText value="{!v.ACTPhoneNumber}"/>
+                                    </a>
+                                    </span>
+
+                            </div>
+                            <div class="slds-col slds-text-align_center slds-size_12-of-12 ">
+                                <div class="slds-col slds-size--12-of-12">
+                                        <span class="txtSeeFAQ">
+                                        <ui:outputText value="{!v.ACTHours}"/>
+                                    </span>
+                                </div>
+                                <div class="slds-col">
+                                    &nbsp;
+                                </div>
+                                <div class="slds-col">
+                                    <span class="txtHomeLinks">
+                                        <a alt="Go to Portal Dashboard"  href="javascript:void(0)" onclick="{!c.handleDashboardClick}" class="linkSmall">
+                                            Dashboard
+                                        </a>
+                                        &nbsp;&nbsp;&nbsp;
+                                        <a alt="Go to Knowledge Base" href="javascript:void(0)" onclick="{!c.handleKnowledgeClick}" class="linkSmall">
+                                            Knowledge
+                                        </a>
+                                        &nbsp;&nbsp;&nbsp;
+                                        <a alt="Go to Account Information" href="javascript:void(0)" onclick="{!c.handleMyAccountClick}" class="linkSmall">
+                                            My Account
+                                        </a>
+
+                                    </span>
+                                    <div class="slds-m-vertical--small"></div>
+                                </div>
+                                <div class="slds-grid slds-grid_vertical slds-align_absolute-center">
+                                    <div class="slds-float_right">
+                                        <a href="https://twitter.com/ACTStudent/" class="linkTiny" target="_blank">
+                                            <img alt="Go to ACT on Twitter" id="imgTwitter" src="{!$Resource.Social_Media_Blue + '/Twitter.png'}" width="26"/>
+                                        </a>
+                                        &nbsp;
+                                        <a href="https://www.facebook.com/theacttest" class="linkTiny" target="_blank">
+                                            <img alt="Go to ACT on Facebook" id="imgFacebook" src="{!$Resource.Social_Media_Blue + '/Facebook.PNG'}" width="26"/>
+                                        </a>
+                                        &nbsp;
+                                        <a href="https://www.linkedin.com/company/act" class="linkTiny" target="_blank">
+                                            <img alt="Go to ACT on LinkedIn" id="imgLinkedIn" src="{!$Resource.Social_Media_Blue + '/LinkedIn.png'}" width="26"/>
+                                        </a>
+                                        &nbsp;
+                                        <a href="https://www.instagram.com/actstudent/" class="linkTiny" target="_blank">
+                                            <img alt="Go to ACT on Instagram" id="imgInstagram" src="{!$Resource.Social_Media_Blue + '/Instagram.png'}" width="26"/>
+                                        </a>
+                                        &nbsp;
+                                        <a href="https://www.youtube.com/user/TheACTTest" class="linkTiny" target="_blank">
+                                            <img alt="Go to ACT on YouTube" id="imgYouTube" src="{!$Resource.Social_Media_Blue + '/YouTube.png'}" width="26"/>
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- / Middle Grid -->
+                        </div>
+
+                    </div>
+                    <!-- / Inner Grid Top -->
+
+                    <!-- Inner Grid Middle -->
+                    <hr class="hrThinLine"/>
+                    <!-- / Inner Grid Middle -->
+
+                    <!-- Inner Grid Bottom -->
+                    <div class="slds-grid slds-wrap">
+                        <div class="slds-col slds-size_12-of-12 slds-text-align_center">
+                            <a alt="View ACT Privacy Notice" href="javascript:void(0)" onclick="{!c.handlePrivacyClick}" class="linkTiny">
+                                Privacy Notice
+                            </a>
+                            &nbsp;&nbsp;&nbsp;
+                            <a alt="Report instances of cheating" href="javascript:void(0)" onclick="{!c.handleCheatingClick}" class="linkTiny">
+                                Report Cheating
+                            </a>
+                            &nbsp;&nbsp;&nbsp;
+                            <a alt="View ACT Ethics" href="javascript:void(0)" onclick="{!c.handleEthicsClick}" class="linkTiny">
+                                Ethics
+                            </a>
+                        </div>
+                        <div class="slds-col slds-size_9-of-12 slds-text-align_center">
+                            <div class="slds-float_right">
+                                <span class="textTinyGrey">
+                                    &copy; 2019, ACT, Inc.&nbsp;&nbsp;
+                                </span>
+                                <a href="javascript:void(0)" onclick="{!c.handleTermsClick}" class="linkTiny">
+                                    Terms of Use
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- /Inner Grid Bottom -->
+                </div>
+            </div>
+
+            <!-- Outer Grid Normal Size -->
+            <div class="slds-grid slds-grid_align-spread slds-show--medium">
+
+                <!-- Spacer Left -->
+                <div class="slds-col nonEssential slds-medium-size_1-of-12 slds-large-size_1-of-12"/>
+
+                <div class="slds-col slds-size_12-of-12 slds-medium-size_10-of-12 slds-large-size_10-of-12">
+                    <!-- Inner Grid Top -->
+                    <div class="slds-grid">
+                        <!-- Left Column With Logo -->
+                        <div class="slds-col slds-size_2-of-12 slds-align-middle slds-p-right_small">
+                            <a href="javascript:void(0)" onclick="{!c.handleLogoClick}" class="linkSmall">
+                                <img alt="Go to ACT.org" src="{!$Resource.ACT_Logo_White}" width="100"/>
+                            </a>
+                        </div>
+                        <div class="slds-col slds-size_8-of-12 slds-align_absolute-center divMiddle slds-p-left_small slds-p-right_small">
+                            <!-- Middle Grid -->
+                            <div class="slds-grid slds-grid_vertical slds-text-align--center">
+                                <div class="slds-col">
+                                    <span class="txtNeedHelp">
+                                        Need help?
+                                    </span>
+                                </div>
+                                <div class="slds-col">
+                                    <a alt="Go to ACT email information" href="javascript:void(0)" onclick="{!c.handleEmailUsClick}" class="linkMedium">
+                                        <ui:outputText value="Email us"/>
+                                    </a>
+                                    <span class="txtSeeFAQ">
+                                        <ui:outputText value=", or call "/>
+                                    </span>
+                                    <a alt="Call ACT"  href="javascript:void(0)" class="linkMedium">
+                                        <ui:outputText value="{!v.ACTPhoneNumber}"/>
+                                    </a>
+                                    <span class="txtSeeFAQ">
+                                        <ui:outputText value=", "/>
+                                    </span>
+                                    <span class="txtSeeFAQ">
+                                        <ui:outputText value="{!v.ACTHours}"/>
+                                    </span>
+                                </div>
+                                <div class="slds-col">
+                                    &nbsp;
+                                </div>
+                                <div class="slds-col">
+                                    <span class="txtHomeLinks">
+                                        <a alt="Go to Portal Dashboard"  href="javascript:void(0)" onclick="{!c.handleDashboardClick}" class="linkSmall">
+                                            Dashboard
+                                        </a>
+                                        &nbsp;&nbsp;&nbsp;
+                                        <a alt="Go to Knowledge Base" href="javascript:void(0)" onclick="{!c.handleKnowledgeClick}" class="linkSmall">
+                                            Knowledge
+                                        </a>
+                                        &nbsp;&nbsp;&nbsp;
+                                        <a alt="Go to Account Information" href="javascript:void(0)" onclick="{!c.handleMyAccountClick}" class="linkSmall">
+                                            My Account
+                                        </a>
+                                    </span>
+                                </div>
+                            </div>
+                            <!-- / Middle Grid -->
+                        </div>
+                        <div class="slds-col slds-size_2-of-12 slds-align-middle slds-p-left_small">
+                            <div class="slds-float_right">
+                                <a href="https://twitter.com/ACTStudent/" class="linkTiny" target="_blank">
+                                    <img alt="Go to ACT on Twitter" id="imgTwitter" src="{!$Resource.Social_Media_Blue + '/Twitter.png'}" width="26"/>
+                                </a>
+                                &nbsp;
+                                <a href="https://www.facebook.com/theacttest" class="linkTiny" target="_blank">
+                                    <img alt="Go to ACT on Facebook" id="imgFacebook" src="{!$Resource.Social_Media_Blue + '/Facebook.PNG'}" width="26"/>
+                                </a>
+                                &nbsp;
+                                <a href="https://www.linkedin.com/company/act" class="linkTiny" target="_blank">
+                                    <img alt="Go to ACT on LinkedIn" id="imgLinkedIn" src="{!$Resource.Social_Media_Blue + '/LinkedIn.png'}" width="26"/>
+                                </a>
+                                &nbsp;
+                                <a href="https://www.instagram.com/actstudent/" class="linkTiny" target="_blank">
+                                    <img alt="Go to ACT on Instagram" id="imgInstagram" src="{!$Resource.Social_Media_Blue + '/Instagram.png'}" width="26"/>
+                                </a>
+                                &nbsp;
+                                <a href="https://www.youtube.com/user/TheACTTest" class="linkTiny" target="_blank">
+                                    <img alt="Go to ACT on YouTube" id="imgYouTube" src="{!$Resource.Social_Media_Blue + '/YouTube.png'}" width="26"/>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- / Inner Grid Top -->
+
+                    <!-- Inner Grid Middle -->
+                    <hr class="hrThinLine"/>
+                    <!-- / Inner Grid Middle -->
+
+                    <!-- Inner Grid Bottom -->
+                    <div class="slds-grid slds-wrap">
+                        <div class="slds-col slds-size_6-of-12">
+                            <a alt="View ACT Privacy Notice" href="javascript:void(0)" onclick="{!c.handlePrivacyClick}" class="linkTiny">
+                                Privacy Notice
+                            </a>
+                            &nbsp;&nbsp;&nbsp;
+                            <a alt="Report instances of cheating" href="javascript:void(0)" onclick="{!c.handleCheatingClick}" class="linkTiny">
+                                Report Cheating
+                            </a>
+                            &nbsp;&nbsp;&nbsp;
+                            <a alt="View ACT Ethics" href="javascript:void(0)" onclick="{!c.handleEthicsClick}" class="linkTiny">
+                                Ethics
+                            </a>
+                        </div>
+                        <div class="slds-col slds-size_6-of-12">
+                            <div class="slds-float_right">
+                                <span class="textTinyGrey">
+                                    &copy; 2019, ACT, Inc.&nbsp;&nbsp;
+                                </span>
+                                <a href="javascript:void(0)" onclick="{!c.handleTermsClick}" class="linkTinyUnderline">
+                                    Terms of Use
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- /Inner Grid Bottom -->
+                </div>
+
+                <!-- Spacer Right -->
+                <div class="slds-col nonEssential slds-medium-size_1-of-12 slds-large-size_1-of-12"/>
+            </div>
+            <!-- / Outer Grid -->
+
+            <!-- Spacer Bottom -->
+            <div class="slds-grid slds-wrap">
+                &nbsp;
+            </div>
+        </div>
+    </section>
+
+</aura:component>
