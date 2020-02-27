@@ -1,0 +1,193 @@
+/**
+ * Created by gurramd on 12/7/2018.
+ */
+
+public without sharing class ACT_OLRDashboardPage {
+    // Call moved to Gordon Engine
+    @AuraEnabled
+    public static ACT_GordonEngine.GordonResults generateEdFiOIDC() {
+        ACT_GordonEngine.GordonInputs objInputs = new ACT_GordonEngine.GordonInputs();
+
+        objInputs.ApplicationName = 'Ed-Fi';
+        objInputs.TargetContactId = ACT_CommunityBaseController.CurrentUserContactId();
+
+        ACT_GordonEngine.GordonResults objResults = ACT_GordonEngine.requestSSOToConnectedApp(objInputs);
+
+        return objResults;
+    }
+
+    // Moved into the Gordon Engine
+    @AuraEnabled
+    public static ACT_GordonEngine.GordonResults generateeMetricsSAML(Id eMetricsContactId, String programTypeSelected) {
+        // Get the current user, if eMetricsContactId is not passed in
+        if (eMetricsContactId == null) {
+            eMetricsContactId = ACT_CommunityBaseController.CurrentUserContactId();
+        }
+
+        ACT_GordonEngine.GordonInputs objInputs = new ACT_GordonEngine.GordonInputs();
+
+        objInputs.ApplicationName = 'eMetric';
+        objInputs.TargetContactId = eMetricsContactId;
+
+        // Add the program type, if it is selected
+        if (String.isNotEmpty(programTypeSelected)) {
+            objInputs.ProgramTypeSelected = programTypeSelected;
+        }
+
+        ACT_GordonEngine.GordonResults objResults = ACT_GordonEngine.requestSSOToConnectedApp(objInputs);
+
+        return objResults;
+    }
+
+    /**
+     * Method to generate OIDC statement for Test Accommodations.
+     * Moved to Gordon Engine
+     */
+    @AuraEnabled
+    public static ACT_GordonEngine.GordonResults generateTAAOIDC() {
+        ACT_GordonEngine.GordonInputs objInputs = new ACT_GordonEngine.GordonInputs();
+
+        objInputs.ApplicationName = 'TAA';
+        objInputs.TargetContactId = ACT_CommunityBaseController.CurrentUserContactId();
+
+        ACT_GordonEngine.GordonResults objResults = ACT_GordonEngine.requestSSOToConnectedApp(objInputs);
+
+        return objResults;
+    }
+
+    // Returns a map of the name of the buttons to whether the current user has permissions or not
+    @AuraEnabled
+    public static map<string, boolean> getDashboardPermissions() {
+        // Create a set for the permission
+        set<string> setPermissions = new set<string>();
+
+        setPermissions.add('SAO_Ed_Fi_Admin');
+        setPermissions.add('SAO_Online_Reporting_User');
+        setPermissions.add('SAO_State_User');
+        setPermissions.add('SAO_Trusted_Agent');
+        setPermissions.add('SAO_TAA');
+
+        // Get the permissions and return them
+        map<string, boolean> mapPermissions = ACT_CommunityBaseController.UserHasPermissionSets(UserInfo.getUserId(), setPermissions);
+
+        // Create a return map, based on the button names
+        map<string, boolean> mapButtons = new map<string, boolean>();
+
+        // Create the individual button permissions
+        boolean blnEdFiAdmin = false;
+        boolean blneMetrics = false;
+        boolean blnInviteUsers = false;
+        boolean blnManageUsers = false;
+        boolean blnPANext = false;
+        //boolean blnRequestAccess = true;
+        boolean blnMyAccess = true;
+
+        // Set the permissions based on the permission sets
+        if (mapPermissions.get('SAO_Ed_Fi_Admin')) {
+            blnEdFiAdmin = true;
+        }
+
+        if (mapPermissions.get('SAO_Online_Reporting_User')) {
+            blneMetrics = true;
+            blnPANext = true;
+            //blnRequestAccess = true;
+        }
+
+        if (mapPermissions.get('SAO_State_User')) {
+            blneMetrics = true;
+            blnPANext = true;
+            //blnRequestAccess = true;
+        }
+
+        if (mapPermissions.get('SAO_Trusted_Agent')) {
+            blneMetrics = true;
+            blnInviteUsers = true;
+            blnManageUsers = true;
+            blnPANext = true;
+            //blnRequestAccess = true;
+        }
+
+        // Check for a system admin
+        if (ACT_CommunityBaseController.UserProfileName(UserInfo.getUserId()) == 'System Administrator') {
+            blnEdFiAdmin = true;
+            blneMetrics = true;
+            blnInviteUsers = true;
+            blnManageUsers = true;
+            blnPANext = true;
+            //blnRequestAccess = true;
+            mapPermissions.put('SAO_TAA',true);
+        }
+
+        // Populate the map
+        mapButtons.put('EdFi Admin', blnEdFiAdmin);
+        mapButtons.put('eMetrics SSO', blneMetrics);
+        mapButtons.put('Invite Users', blnInviteUsers);
+        mapButtons.put('Manage Users', blnManageUsers);
+        mapButtons.put('PANext', blnPANext);
+        //mapButtons.put('Request Access', blnRequestAccess);
+        ACT_Success_Toggles__c st = ACT_Success_Toggles__c.getOrgDefaults();
+        if(st.Enable_TAA__c == true){
+            if(mapPermissions.containsKey('SAO_TAA')){
+                mapButtons.put('TAA Role', mapPermissions.get('SAO_TAA'));
+            }
+        }
+        else{
+            mapButtons.put('TAA Role',false);
+        }
+        mapButtons.put('My Access', blnMyAccess);
+
+        // Return the map
+        return mapButtons;
+    }
+
+    @AuraEnabled
+    public static List<ListView> getListViews() {
+        try {
+            List<ListView> listviews = [SELECT Id,Name, sobjecttype FROM ListView where sobjecttype = 'Access__c' and name = 'All' Order By sobjectType];
+            return listviews;
+        } catch (exception ex) {
+            system.debug(ex.getMessage());
+            AuraHandledException e = new AuraHandledException(ex.getMessage());
+            throw e;
+        }
+    }
+
+    @AuraEnabled
+    public static String getSessionType() {
+        try {
+            Map<String, String> currentSessionAttributes = Auth.SessionManagement.getCurrentSession();
+            String sessionType = currentSessionAttributes.get('SessionType');
+            return sessionType;
+        } catch (exception ex) {
+            system.debug(ex.getMessage());
+            AuraHandledException e = new AuraHandledException(ex.getMessage());
+            throw e;
+        }
+    }
+
+    @AuraEnabled
+    public static List<Hierarchy_Approval__c>  getHierarchyApprovalsData() {
+        try {
+
+            List<Hierarchy_Approval__c> currentApprovalsList = new List<Hierarchy_Approval__c> ();
+            list<ACT_ComminityLoginSuccess__c> existingRecord  =  new list<ACT_ComminityLoginSuccess__c>([select id,name,SetupOwnerId,Login_Access__c from  ACT_ComminityLoginSuccess__c where SetupOwnerId = :userinfo.getuserid() ]);
+
+            system.debug('existingRecord------------'+existingRecord);
+            if(existingRecord.size()>0 )
+            {
+
+                if(existingRecord[0].Login_Access__c == true) {
+                    currentApprovalsList = ACT_DashboardMessages.getHierarchyApprovalsData();
+                    existingRecord[0].Login_Access__c = false;
+                    system.debug('currentApprovalsList------------'+currentApprovalsList);
+                    update existingRecord[0];
+                }
+            }
+            return currentApprovalsList;
+        } catch (exception ex) {
+            system.debug(ex.getMessage());
+            AuraHandledException e = new AuraHandledException(ex.getMessage());
+            throw e;
+        }
+    }
+}
