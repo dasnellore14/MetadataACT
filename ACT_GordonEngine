@@ -1,0 +1,809 @@
+/**
+ * Created by adamsm on 12/26/2019.
+ */
+
+public with sharing class ACT_GordonEngine {
+    public static GordonResults requestSSOToConnectedApp(GordonInputs inputs) {
+        User usrCurrent;
+
+        try {
+            // Create temporary variables
+            List<ACRExtension> lstACRExtensions;
+
+            // Create the return object
+            GordonResults objReturn = new GordonResults();
+            objReturn.AllowSSO = false;
+
+            // Check if single attribute is turned on
+            ACT_Success_Toggles__c toggleSettings = ACT_Success_Toggles__c.getOrgDefaults();
+            Boolean blnStateAndDistrict = toggleSettings != null && toggleSettings.SAO_State_and_District__c == true;
+
+            // Get the current user information
+            usrCurrent =
+            [
+                    SELECT
+                            ContactId,
+                            SAML_Attribute_1__c,
+                            SAML_Attribute_2__c,
+                            SAML_Attribute_3__c,
+                            SAML_Attribute_4__c,
+                            SAML_Attribute_5__c
+                    FROM
+                            User
+                    WHERE
+                            Id = :UserInfo.getUserId()
+            ];
+
+            // Get the requested user information
+            User usrRequested =
+            [
+                    SELECT
+                            Id
+                    FROM
+                            User
+                    WHERE
+                            ContactId =: inputs.TargetContactId
+            ];
+
+            // Get the AccountContactRelation records, based on the application
+            String strACRQuery = 'SELECT AccountId, Ed_Fi_Role__c, eMetrics_Role__c, PANext_Role__c, Status__c, TAA_Role__c, Account.eMetric_Org_Type__c, Account.Historical_MDM_ID__c, Account.MDM_ID__c, Account.Name ';
+            strACRQuery += 'FROM AccountContactRelation ';
+            strACRQuery += 'WHERE ContactId = \'' + inputs.TargetContactId + '\' AND IsActive = true AND Status__c = \'Active\' AND Account.Active__c = true ';
+
+            switch on inputs.ApplicationName {
+                when 'Ed-Fi' {
+                    objReturn.ValidationResults = 'You do not have access to any schools or districts for Ed-Fi at this time.  You will receive an email notification when your access is approved.';
+                    strACRQuery += 'AND Ed_Fi_Role__c != null ';
+                }
+
+                when 'eMetric' {
+                    // Limit results to certain org types
+                    set<string> seteMetricOrgTypes = new set<string>{
+                            'B', 'D', 'E', 'S'
+                    };
+
+                    // Note, include null eMetricsRoles because of PANext
+                    objReturn.ValidationResults = 'No Access';
+                    strACRQuery += 'AND Account.eMetric_Org_Type__c in: seteMetricOrgTypes ';
+                }
+
+                when 'TAA' {
+                    objReturn.ValidationResults = 'You do not have access to any schools or districts for TAA at this time.  You will receive an email notification when your access is approved.';
+                    strACRQuery += 'AND TAA_Role__c != null ';
+                }
+            }
+
+            List<AccountContactRelation> lstACR = Database.query(strACRQuery);
+
+            // Perform filtering and additional processing, if necessary
+            switch on inputs.ApplicationName {
+                when 'eMetric' {
+                    lstACR = removeDistrictChildren(lstACR);
+                    lstACRExtensions = removeInvalidHAs(lstACR);
+
+                    // Determine if program types are enabled
+                    if (blnStateAndDistrict) {
+                        if (inputs.ProgramTypeSelected == null) {
+                            objReturn = determineProgramTypeOptions(objReturn, lstACR);
+                        }
+                    }
+
+                    // Abort processing, and show the user the program type options, if required
+                    if (objReturn.ProgramTypeSelectionRequired == true) {
+                        return objReturn;
+                    }
+                }
+            }
+
+            // Loop through the ACRs to set the status, and create the individual SSO strings
+            String[] arySSO = new String[]{};
+
+            // Hold application-specific variables
+            String streMetricDisputed = 'Not Checked';
+            set<String> seteMetricSentMDMIDs = new set<String>();
+
+            for (AccountContactRelation thisACR : lstACR) {
+                String strSSO = '';
+
+                switch on inputs.ApplicationName {
+                    when 'Ed-Fi' {
+                        objReturn.AllowSSO = true;
+                        objReturn.ValidationResults = '';
+
+                        strSSO += thisACR.Account.MDM_ID__c + ':';
+                        strSSO += thisACR.Ed_Fi_Role__c;
+
+                        arySSO.add(strSSO);
+                    }
+
+                    when 'eMetric' {
+                        string streMetricRole = thisACR.eMetrics_Role__c;
+
+                        // Grant the user "Detail Viewer" if they have no eMetricRole, but do have PANext
+                        if (String.isEmpty(streMetricRole) && String.isNotEmpty(thisACR.PANext_Role__c)) {
+                            streMetricRole = 'Normal-Full';
+                        }
+
+                        // Check if a program type was selected, and if so check it.  If it doesn't match
+                        //   set the eMetricsRole to null so it doesn't send it
+                        if (String.isNotEmpty(inputs.ProgramTypeSelected) && determineProgramType(thisACR) != inputs.ProgramTypeSelected) {
+                            streMetricRole = null;
+                        }
+
+                        if (String.isNotEmpty(streMetricRole)) {
+                            // Add the record from the ACR
+                            strSSO += thisACR.Account.MDM_ID__c + ':';
+                            strSSO += streMetricRole + ':';
+                            strSSO += thisACR.Account.eMetric_Org_Type__c;
+
+                            arySSO.add(strSSO);
+
+                            // Flag that at least one record was sent
+                            streMetricDisputed = 'Non Disputed';
+
+                            // Add to the sent MDM Ids
+                            seteMetricSentMDMIDs.add(thisACR.Account.MDM_ID__c);
+
+                            // Check for historical records
+                            if (!String.isEmpty(thisACR.Account.Historical_MDM_ID__c)) {
+                                list<string> lstHistorical = thisACR.Account.Historical_MDM_ID__c.split(',');
+
+                                for (string thisMDM : lstHistorical) {
+                                    if (!seteMetricSentMDMIDs.contains(thisMDM)) {
+                                        strSSO = thisMDM + ':';
+                                        strSSO += streMetricRole + ':';
+                                        strSSO += thisACR.Account.eMetric_Org_Type__c;
+
+                                        arySSO.add(strSSO);
+
+                                        // Add to the sent MDM Ids
+                                        seteMetricSentMDMIDs.add(thisMDM);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    when 'TAA' {
+                        objReturn.AllowSSO = true;
+                        objReturn.ValidationResults = '';
+
+                        strSSO += thisACR.Account.MDM_ID__c + ':';
+                        strSSO += thisACR.TAA_Role__c;
+
+                        arySSO.add(strSSO);
+                    }
+                }
+            }
+
+            // For now, write out the values to attributes 1-5 whether single attribute is on or off
+            chopUpSSO(usrCurrent, arySSO);
+
+            // Perform a post-check for status
+            switch on inputs.ApplicationName {
+                when 'eMetric' {
+                    if (streMetricDisputed == 'Not Checked') {
+                        // If there wasn't already a successful ACR, check for the combined status of all ACRs
+                        // The result will either be:
+                        //    Not Checked if there was no ACRs
+                        //    Approval Required if there are only ACRs with HAs in the status of Approval Required
+                        //    Disputed if there are only ACRs with HAs in the status of Disputed
+                        //    Disputed and Approval Required if there were ACRs with HAs in both statuses
+                        for (ACRExtension thisACRE : lstACRExtensions) {
+                            for (String Status : thisACRE.Statuses) {
+                                if (Status == 'Disputed' || Status == 'Pending') {
+                                    switch on streMetricDisputed {
+                                        when 'Not Checked' {
+                                            streMetricDisputed = 'Disputed';
+                                        }
+
+                                        when 'Approval Required' {
+                                            streMetricDisputed = 'Disputed and Approval Required';
+                                        }
+                                    }
+                                }
+
+                                if (Status == 'Approval Required') {
+                                    switch on streMetricDisputed {
+                                        when 'Not Checked' {
+                                            streMetricDisputed = 'Approval Required';
+                                        }
+
+                                        when 'Disputed' {
+                                            streMetricDisputed = 'Disputed and Approval Required';
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Now determine what message to send
+                    Map<String, String> mapStatus = new Map<String, String>();
+
+                    switch on streMetricDisputed {
+                        when 'Disputed' {
+                            // Create a map of disputed orgs and one of the disputed years
+                            for (ACRExtension thisACR : lstACRExtensions) {
+                                if ((thisACR.Statuses.contains('Disputed') || thisACR.Statuses.contains('Pending')) && thisACR.DisputedYears.size() > 0) {
+                                    for (String thisYear : thisACR.DisputedYears) {
+                                        mapStatus.put(thisACR.AccountName + 'Disputed Record', thisYear);
+                                    }
+                                }
+                            }
+                        }
+
+                        when 'Non Disputed' {
+                            mapStatus.put('Success', 'Success');
+                            objReturn.AllowSSO = true;
+                        }
+
+                        when 'Approval Required' {
+                            mapStatus.put('Approval Required', 'Approval Required');
+                        }
+
+                        when 'Disputed and Approval Required' {
+                            mapStatus.put('Disputed and Approval Required', 'Disputed and Approval Required');
+                        }
+
+                        when 'Not Checked' {
+                            mapStatus.put('NoAccess', 'NoAccess');
+                        }
+
+                        when else {
+                            mapStatus.put('NoAccess', 'NoAccess');
+                        }
+                    }
+
+                    objReturn.ValidationResults = JSON.serialize(mapStatus);
+                }
+            }
+
+            // Write to the audit log
+            objReturn = writeSSOActivity(inputs, objReturn, arySSO);
+
+            // Return the results
+            return objReturn;
+        }
+        catch (Exception ex) {
+            system.debug('requestSSOToConnectedApp Error = ' + ex.getMessage());
+
+            // Log the error
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', usrCurrent.ContactId, 'Determine SSO', 'requestSSOToConnectedApp', '', '', '');
+
+            // Create an error to throw
+            AuraHandledException e = new AuraHandledException('An error has occurred trying to verify access to ' + inputs.ApplicationName + '.  Please try again or contact Customer Care.  Error = "' + ex.getMessage() + '"');
+            throw e;
+        }
+    }
+
+    public static GordonResults requestSSOToConnectedAppByAccount(GordonInputs inputs) {
+
+        try {
+            // Create the return object
+            GordonResults objReturn = new GordonResults();
+            objReturn.AllowSSO = false;
+
+            // Check if single attribute is turned on
+            ACT_Success_Toggles__c toggleSettings = ACT_Success_Toggles__c.getOrgDefaults();
+            Boolean blnStateAndDistrict = toggleSettings != null && toggleSettings.SAO_State_and_District__c == true;
+
+            ACT_Community_URL__c urlSettings = ACT_Community_URL__c.getOrgDefaults();
+            objReturn.eMetricURL = urlSettings.eMetricURL__c;
+
+
+            // Get the current user information
+            User usrCurrent =
+            [
+                    SELECT
+                            ContactId,
+                            SAML_Attribute_1__c,
+                            SAML_Attribute_2__c,
+                            SAML_Attribute_3__c,
+                            SAML_Attribute_4__c,
+                            SAML_Attribute_5__c
+                    FROM
+                            User
+                    WHERE
+                            Id = :UserInfo.getUserId()
+            ];
+
+
+
+            // Loop through the ACRs to set the status, and create the individual SSO strings
+            String[] arySSO = new String[]{};
+
+            // Hold application-specific variables
+            //String streMetricDisputed = 'Not Checked';
+            set<String> seteMetricSentMDMIDs = new set<String>();
+            Id accid = inputs.TargetAccountId;
+            set<Id> accIds = new set<Id>();
+            accIds.add(accid);
+            map<id, list<Account>> MapAccToResLstChildren = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToChildrenMap(accIds,true,false);
+            if(!MapAccToResLstChildren.isEmpty()) {
+
+                for (Account thisAcc : MapAccToResLstChildren.get(accid)) {
+                    String strSSO = '';
+
+                    switch on inputs.ApplicationName {
+                        when 'eMetric' {
+                            string streMetricRole = 'Admin-Full';
+                            objReturn.AllowSSO = true;
+                            if (String.isNotEmpty(streMetricRole)) {
+                                // Add the record from the ACR
+                                strSSO += thisAcc.MDM_ID__c + ':';
+                                strSSO += streMetricRole + ':';
+                                strSSO += thisAcc.eMetric_Org_Type__c;
+
+                                arySSO.add(strSSO);
+
+                                // Add to the sent MDM Ids
+                                seteMetricSentMDMIDs.add(thisAcc.MDM_ID__c);
+
+                                // Check for historical records
+                                if (!String.isEmpty(thisAcc.Historical_MDM_ID__c)) {
+                                    list<string> lstHistorical = thisAcc.Historical_MDM_ID__c.split(',');
+
+                                    for (string thisMDM : lstHistorical) {
+                                        if (!seteMetricSentMDMIDs.contains(thisMDM)) {
+                                            strSSO = thisMDM + ':';
+                                            strSSO += streMetricRole + ':';
+                                            strSSO += thisAcc.eMetric_Org_Type__c;
+
+                                            arySSO.add(strSSO);
+
+                                            // Add to the sent MDM Ids
+                                            seteMetricSentMDMIDs.add(thisMDM);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                    }
+                }
+            }
+
+            // For now, write out the values to attributes 1-5 whether single attribute is on or off
+            chopUpSSO(usrCurrent, arySSO);
+
+            // Write to the audit log
+            objReturn = writeSSOActivity(inputs, objReturn, arySSO);
+
+            // Return the results
+            return objReturn;
+
+
+        }catch (Exception ex) {
+            system.debug('requestSSOToConnectedAppByAccount Error = ' + ex.getMessage());
+
+            // Log the error
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', inputs.CurrentUser.ContactId, 'Determine SSO', 'requestSSOToConnectedAppByAccount', '', '', '');
+
+            // Create an error to throw
+            AuraHandledException e = new AuraHandledException('An error has occurred trying to verify access to ' + inputs.ApplicationName + '.  Please try again or contact Customer Care.  Error = "' + ex.getMessage() + '"');
+            throw e;
+        }
+
+
+    }
+
+    //////////////////////////////////////
+    // Private functions
+    //////////////////////////////////////
+    private static void chopUpSSO(User currentUser, String[] sSOArray) {
+        // Clear out the existing attributes
+        CurrentUser.SAML_Attribute_1__c = null;
+        CurrentUser.SAML_Attribute_2__c = null;
+        CurrentUser.SAML_Attribute_3__c = null;
+        CurrentUser.SAML_Attribute_4__c = null;
+        CurrentUser.SAML_Attribute_5__c = null;
+
+        // Get multiple attribute variables
+        integer intMaxSSOSize = ACT_CommunityConstants.SAML_MaxUserAttributeSize;
+        integer intMaxSSOChunks = ACT_CommunityConstants.SAML_MaxUserAttributes;
+
+        // Divide up the SSO into chunks of less than max characters
+        integer intChunk = 1;
+        string strChunk = '';
+
+        for (integer intX = 0; intX < sSOArray.size(); intX++)
+        {
+            String strSSO = sSOArray[intX];
+
+            // If this record will cause the chunk size to be exceeded, write out the chunk so far, and make a new chunk.
+            if (strSSO.length() + strChunk.length() + 1 > intMaxSSOSize) {
+                CurrentUser.put('SAML_Attribute_' + intChunk + '__c', strChunk);
+                strChunk = strSSO;
+
+                // Increment the counter
+                intChunk++;
+
+                // Check to see if the chunks are exhausted
+                if (intChunk > intMaxSSOChunks) {
+                    throw new CC_SC_GEN_Exception('The current user has more access records than we currently support.');
+                }
+            }
+            else {
+                if (strChunk != '') {
+                    strChunk += ',';
+                }
+
+                strChunk += strSSO;
+            }
+        }
+
+        // Write out the last chunk
+        if (strChunk != '') {
+            CurrentUser.put('SAML_Attribute_' + intChunk + '__c', strChunk);
+        }
+
+        update CurrentUser;
+    }
+
+    private static String determineProgramType(AccountContactRelation thisACR) {
+        String[] aryProgramTypes = new String[]{};
+
+        if (String.isNotEmpty(thisACR.eMetrics_Role__c)) {
+            aryProgramTypes.add('N');
+        }
+
+        if (String.isNotEmpty(thisACR.PANext_Role__c)) {
+            aryProgramTypes.add('S');
+            aryProgramTypes.add('D');
+        }
+
+        return String.join(aryProgramTypes, ',');
+    }
+
+    private static GordonResults determineProgramTypeOptions(GordonResults currentResults, List<AccountContactRelation> aCRList) {
+        // Create a map of Program Types to a list of ACRs
+        Map<String, List<AccountContactRelation>> mapPTACR = new Map<String, List<AccountContactRelation>>();
+
+        // Loop through and add the various options along with the associated organizations to a map
+        for (AccountContactRelation thisACR : aCRList) {
+            String strPT = determineProgramType(thisACR);
+
+            List<AccountContactRelation> lstACRs = mapPTACR.get(strPT);
+
+            if (lstACRs == null) {
+                lstACRs = new List<AccountContactRelation>();
+            }
+
+            lstACRs.add(thisACR);
+
+            mapPTACR.put(strPT, lstACRs);
+        }
+
+        if (mapPTACR.keySet().size() == 1) {
+            for (string thisPT : mapPTACR.keySet()) {
+                currentResults.ProgramType = thisPT;
+            }
+        }
+
+        if (mapPTACR.keySet().size() > 1) {
+            currentResults.ProgramTypeSelectionRequired = true;
+
+            // Put the account names into the maps
+            for (String strPT : mapPTACR.keySet()) {
+                List<AccountContactRelation> lstACRs = mapPTACR.get(strPT);
+                ProgramType thisPT = new ProgramType();
+
+                thisPT.Name = strPT;
+
+                // Set the title
+                switch on strPT {
+                    when 'N' {
+                        thisPT.Title = 'View Student Scores for The ACT for organization(s):';
+                    }
+
+                    when 'S,D' {
+                        thisPT.Title = 'View Contract Reports for The ACT for organization(s):';
+                    }
+
+                    when 'N,S,D' {
+                        thisPT.Title = 'View Student Scores for The ACT and Contract Reports for organization(s):';
+                    }
+
+                    when else {
+                        thisPT.Title ='Unknown = ' + strPT;
+                    }
+                }
+
+                // For now, just put all names in the map, we may limit it by parent in the future
+                for (AccountContactRelation thisACR : lstACRs) {
+                    thisPT.Organizations.add(thisACR.Account.Name);
+                }
+
+                currentResults.ProgramTypeOptions.add(thisPT);
+            }
+        }
+
+        return currentResults;
+    }
+
+    private static List<AccountContactRelation> removeDistrictChildren(List<AccountContactRelation> aCRList) {
+        // Create the return list
+        List<AccountContactRelation> lstReturn = new List<AccountContactRelation>();
+
+        // Look for children of districts
+        set<Id> setDistricts = new set<Id>();
+
+        for (AccountContactRelation thisACR : aCRList) {
+            if (thisACR.Account.eMetric_Org_Type__c == 'D') {
+                setDistricts.add(thisACR.AccountId);
+            }
+        }
+
+        // Get the children for the districts being sent, it is ok to include inactive accounts, because it is looking for orgs to not send for
+        map<Id, list<Account>> mapChildren = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToChildrenMap(setDistricts, false, true);
+
+        // Loop through the children, flagging those accounts to not be sent
+        Set<Id> setChildrenAccounts = new Set<Id>();
+
+        for (List<Account> lstChildren : mapChildren.values()) {
+            if (lstChildren != null) {
+                for (Account thisChild : lstChildren) {
+                    setChildrenAccounts.add(thisChild.Id);
+                }
+            }
+        }
+
+        // Add back the ACRs for non-children
+        for (AccountContactRelation thisACR : aCRList) {
+            if (!setChildrenAccounts.contains(thisACR.AccountId)) {
+                lstReturn.add(thisACR);
+            }
+        }
+
+        return lstReturn;
+    }
+
+    private static List<ACRExtension> removeInvalidHAs(List<AccountContactRelation> aCRList) {
+        // Create return variable
+        List<ACRExtension> lstReturn = new List<ACRExtension>();
+
+        // Make a set of relevant accounts
+        Set<Id> setAccounts = new Set<Id>();
+
+        for (AccountContactRelation thisACR : aCRList) {
+            // Don't bother with states or enterprise accounts
+            if (thisACR.Account.eMetric_Org_Type__c != 'S' && thisACR.Account.eMetric_Org_Type__c != 'E') {
+                setAccounts.add(thisACR.AccountId);
+            }
+        }
+
+        // Get a map of the hierarchies for the districts of the accounts
+        map<Id, map<integer, Hierarchy_Approval__c>> mapAccHA = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToHierarchyApprovalMap(setAccounts);
+
+        // Get a map of accounts to their districts
+        map<id, id> mapDistricts = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToParentIdMap(setAccounts, new Set<String>{
+                'D'
+        });
+
+        // Loop through the ACRs, looking for ones to kick out, flagging disputed ones along the way
+        for (integer intX = 0; intX < aCRList.size(); intX++) {
+            Boolean blnRemove = false;
+            AccountContactRelation thisACR = aCRList[intX];
+
+            // Create an ACR Extension holder record
+            ACRExtension thisACRE = new ACRExtension();
+            thisACRE.AccountName = thisACR.Account.Name;
+            thisACRE.ACR = thisACR;
+
+            // Check if a Hierarchy Approval check is needed
+            boolean blnCheckDistrict = false;
+
+            switch on thisACR.Account.eMetric_Org_Type__c {
+                when 'B' {
+                    // Only check if schools roll up to a district
+                    if (mapDistricts.get(thisACR.AccountId) != thisACR.AccountId) {
+                        blnCheckDistrict = true;
+                    }
+                }
+
+                // Check all districts
+                when 'D' {
+                    blnCheckDistrict = true;
+                }
+
+                when 'E' {
+                    // For super users, don't check the district
+                    blnCheckDistrict = false;
+                }
+
+                when 'S' {
+                    // For states, don't check the district
+                    blnCheckDistrict = false;
+                }
+
+                // Check sub-districts, note looking for null in when statement to avoid SF bug
+                when else {
+                    if (thisACR.Account.eMetric_Org_Type__c == null) {
+                        blnCheckDistrict = true;
+                    }
+                }
+            }
+
+            // If a hierarchy approval check is needed, do so
+            if (blnCheckDistrict) {
+                map<integer, Hierarchy_Approval__c> thismapHA = mapAccHA.get(thisACR.AccountId);
+
+                // If the district has no hierarchy approval records, don't send it
+                if (thismapHA == null) {
+                    blnRemove = true;
+                }
+                else {
+                    for (integer thisAY : thismapHA.keySet()) {
+                        Hierarchy_Approval__c thisHA = thismapHA.get(thisAY);
+
+                        // Check if there is an HA record for this year, on this district
+                        if (thisHA == null) {
+                            // If the district has no hierarchy approval record on the current year, don't send it
+                            if (thisAY == 0) {
+                                blnRemove = true;
+                            }
+                        }
+                        else {
+                            // Add each of the statuses for this ACR
+                            thisACRE.Statuses.add(thisHA.Status__c);
+
+                            switch on thisHA.Status__c {
+                                when 'Approved' {
+                                    // If the hierarchy is approved, let it go
+                                }
+
+                                when 'Disputed' {
+                                    // If the district's hierarchy approval record is disputed, don't send it, and notify the user
+                                    blnRemove = true;
+                                    thisACRE.DisputedYears.add(thisHA.Academic_Year__c);
+                                }
+
+                                when 'Pending' {
+                                    // If the district's hierarchy approval record is pending, don't send it, and notify the user
+                                    blnRemove = true;
+                                    thisACRE.DisputedYears.add(thisHA.Academic_Year__c);
+                                }
+
+                                when else {
+                                    // If the district's hierarchy approval record is not approved or disputed, don't send the ACR
+                                    blnRemove = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If this ACR should not be sent, remove it from the list
+            if (blnRemove) {
+                aCRList.remove(intX);
+                intX = intX - 1;
+            }
+
+            // Add this extension to the list to process later
+            lstReturn.add(thisACRE);
+        }
+
+        return lstReturn;
+    }
+
+    public static GordonResults writeSSOActivity(GordonInputs inputs, GordonResults outputs, String[] ssoStrings) {
+        // Write to the audit log
+        SSO_Activity__c thisSSO = new SSO_Activity__c();
+
+        thisSSO.Program_Type__c = outputs.ProgramType;
+        thisSSO.Requested_Date_Time__c = DateTime.now();
+        thisSSO.SSO_Application__c = inputs.ApplicationName;
+        thisSSO.SSO_Details__c = String.join(ssoStrings, ',');
+        thisSSO.SSO_Error__c = outputs.ValidationResults;
+        thisSSO.SSO_Logged_In_User__c = UserInfo.getUserId();
+        thisSSO.SSO_Requested_Contact__c = inputs.TargetContactId;
+        //thisSSO.SSO_Requested_User__c = inputs.CurrentUser.Id;
+
+        // Check for program types
+        if (inputs.ProgramTypeSelected != null) {
+            thisSSO.Program_Choice_Presented__c = true;
+            thisSSO.Program_Type__c = inputs.ProgramTypeSelected;
+        }
+
+        // Write out the record, and populate the results with the Id
+        insert thisSSO;
+
+        outputs.SSOActivityId = thisSSO.Id;
+
+        return outputs;
+    }
+
+    //////////////////////////////////////
+    // Subclasses
+    //////////////////////////////////////
+    public class ACRExtension {
+        public String AccountName {get; set;}
+        public AccountContactRelation ACR {get; set;}
+        public Set<String> DisputedYears {get; set;}
+        public Set<String> Statuses {get; set;}
+
+        public ACRExtension() {
+            DisputedYears = new Set<String>();
+            Statuses = new Set<String>();
+        }
+    }
+
+    public class GordonResults {
+        @AuraEnabled
+        public Boolean AllowSSO {get; set;}
+        @AuraEnabled
+        public String ProgramType {get; set;}
+        @AuraEnabled
+        public List<ProgramType> ProgramTypeOptions {get; set;}
+        @AuraEnabled
+        public Boolean ProgramTypeSelectionRequired {get; set;}
+        @AuraEnabled
+        public String SSOActivityId {get; set;}
+        @AuraEnabled
+        public String ValidationResults {get; set;}
+        @AuraEnabled
+        public String eMetricURL {get; set;}
+
+        // Constructor
+        public GordonResults() {
+            this.ProgramTypeSelectionRequired = false;
+            this.ProgramTypeOptions = new List<ProgramType>();
+        }
+    }
+
+    public class GordonInputs {
+        public String ApplicationName {get; set;}
+        public Boolean BOBOOverride {get; set;}
+        public String ProgramTypeSelected {get; set;}
+        public Id TargetAccountId {get; set;}
+        public Id TargetContactId {get; set;}
+        public User CurrentUser {get; set;}
+        public User RequestedUser {get; set;}
+
+        // Public functions
+        public void getUserInformation() {
+            CurrentUser =
+            [
+                    SELECT
+                            ContactId,
+                            SAML_Attribute_1__c,
+                            SAML_Attribute_2__c,
+                            SAML_Attribute_3__c,
+                            SAML_Attribute_4__c,
+                            SAML_Attribute_5__c
+                    FROM
+                            User
+                    WHERE
+                            Id =: UserInfo.getUserId()
+            ];
+
+            // Get the requested user information
+            if (TargetContactId != null) {
+                RequestedUser = [
+                        SELECT
+                                Id
+                        FROM
+                                User
+                        WHERE
+                                ContactId =: TargetContactId
+                ];
+            }
+        }
+    }
+
+    public class ProgramType {
+        @AuraEnabled
+        public String Name {get; set;}
+        @AuraEnabled
+        public List<String> Organizations {get; set;}
+        @AuraEnabled
+        public String Title {get; set;}
+
+        // Constructor
+        public ProgramType() {
+            this.Organizations = new List<String>();
+        }
+    }
+}
