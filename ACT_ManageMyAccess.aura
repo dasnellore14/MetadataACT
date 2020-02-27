@@ -1,0 +1,853 @@
+<!--
+ - Created by Rama on 2019-06-13.
+ -->
+<aura:component controller="ACT_ManageMyAccessController" description="ACT_ManageMyAccess"
+                extends="c:ACT_CommunityBase"
+                implements="force:appHostable,flexipage:availableForAllPageTypes,forceCommunity:availableForAllPageTypes">
+
+    <!-- Attributes -->
+    <aura:attribute name="validateCount" type="Integer" default="0" />
+    <aura:attribute name="accessCodeId" type="string" />
+    <aura:attribute name="strEmetricRole" type="string" />
+    <aura:attribute name="accessCodeUsage" type="integer" />
+    <aura:attribute name="disableshowAccess" type="boolean" default="false" />
+    <aura:attribute name="haveAcessCode" type="boolean" default="false"/>
+    <aura:attribute name="selectedRecord" type="sObject" default="{}"
+                    description="Use,for store SELECTED sObject Record"/>
+    <aura:attribute name="validateResponse" type="String" />
+    <aura:attribute name="selectedAccountRecord" type="sObject" default="{}"
+                    description="Use,for store SELECTED sObject Record"/>
+    <aura:attribute name="boolShowMyAccess" type="boolean" default="false"/>
+    <aura:attribute name="boolIsTrustedAgent" type="boolean" default="false"/>
+    <aura:attribute name="boolIsStateTrustedAgent" type="boolean" default="false"/>
+    <aura:attribute name="boolIsTestCoordinatorRole" type="boolean" default="false"/>
+    <aura:attribute name="boolShowOnlineReport" type="boolean" default="false"/>
+    <aura:attribute name="boolShowEdFIReport" type="boolean" default="false"/>
+    <aura:attribute name="knowledgeURL" type="String"/>
+    <aura:attribute name="accessCode" type="String"/>
+    <aura:attribute name="trustedAgentType" type="String"  default=""/>
+    <aura:attribute name="selectOptionTitle" type="String" default="Select an option"/>
+    <aura:attribute name="showError" type="Boolean" default="false"/>
+    <aura:attribute name="spinnerClass" type="String" default="false"/>
+    <aura:attribute name="selectedView" type="String" default=""/>
+    <aura:attribute name="trustedAgent" type="Boolean" default="false"/>
+    <aura:attribute name="boolDisableCodeSection" type="Boolean" default="false"/>
+    <aura:attribute name="boolMyAccessBtn" type="Boolean" default="true"/>
+
+    <!--Aura attributes for Request more access functionality.-->
+    <aura:attribute name="boolRequestMoreAccess" type="boolean" default="false"/>
+    <aura:attribute name="makeTrustedAgent" type="boolean" default="false"/>
+    <aura:attribute name="makeEdFi" type="boolean" default="false"/>
+    <aura:attribute name="makeTAA" type="boolean" default="false"/>
+    <aura:attribute name="checkedDV" type="String"/>
+    <aura:attribute name="checkedSV" type="String"/>
+    <aura:attribute name="boolShowTAARole" type="boolean" default="false"/>
+    <aura:attribute name="strAccessLevels" type="string"/>
+    <aura:attribute name="boolDisableReqMoreBtn" type="boolean" default="false"/>
+    <aura:attribute name="boolACRAvailable" type="boolean" default="true"/>
+    <aura:attribute name="enableEdFi" type="boolean" default="false"/>
+    <aura:attribute name="enableTAA" type="boolean" default="false"/>
+    <aura:handler name="change" value="{!v.accessCode}" action="{!c.clearInputs}"/>
+    <aura:handler name="change" value="{!v.selectedRecord}" action="{!c.enableDisableMyAccessBtn}"/>
+    <aura:handler name="change" value="{!v.selectedAccountRecord}" action="{!c.enableDisableUseAccessBtn}"/>
+
+
+    <!-- Do Init -->
+    <aura:handler name="init" value="{!this}" action="{!c.doInit}"/>
+    <section>
+        <div>
+            <aura:if isTrue="{!v.showError}">
+                <div id="error">
+                    <ui:outputRichText value="{!v.errorMessage}"/>
+                </div>
+            </aura:if>
+            <!-- Title Area -->
+            <h1 class="CB_headerLevel2">Select an Option</h1>
+
+            <div class="slds-p-top_small"/>
+
+            <div class="CB_shadowBox">
+                <div style="display:inline-block;width:235px;">
+                    <ui:menu aura:id="selectList">
+                        <ui:menuTriggerLink>
+                            <div class="selectedViewText">
+                                <div class="slds-grid">
+                                    <aura:if isTrue="{!v.selectedView != ''}">
+                                        <div class="slds-size_1-of-12">
+                                            <lightning:icon class="greenOnWhite" iconName="utility:check"
+                                                            size="x-small" alternativeText="check"/>
+                                        </div>
+                                        <div class="slds-size_9-of-12">
+                                            <span style="text-align:left;vertical-align:middle">{!v.selectOptionTitle}</span>
+                                        </div>
+                                        <div class="slds-size_2-of-12" style="text-align:right">
+                                            <lightning:buttonIcon iconName="utility:down" size="small" alternativeText="down"/>
+                                        </div>
+                                    </aura:if>
+
+                                    <aura:if isTrue="{!v.selectedView == ''}">
+                                        <div class="slds-size_10-of-12">
+                                            <span style="text-align:left">{!v.selectOptionTitle}</span>
+                                        </div>
+                                        <div class="slds-size_2-of-12" style="text-align:right">
+                                            <lightning:buttonIcon iconName="utility:down" size="small" alternativeText="down"/>
+                                        </div>
+                                    </aura:if>
+                                </div>
+                            </div>
+                        </ui:menuTriggerLink>
+                        <ui:menuList>
+                            <ui:actionMenuItem click="{!c.selectView}"
+                                               label="&nbsp;&nbsp;&nbsp;&nbsp;Review My Access"/>
+                            <ui:actionMenuItem click="{!c.selectView}"
+                                               label="&nbsp;&nbsp;&nbsp;&nbsp;Use an Access Code"/>
+                            <ui:actionMenuItem click="{!c.selectView}"
+                                               label="&nbsp;&nbsp;&nbsp;&nbsp;Request More Access"/>
+                        </ui:menuList>
+                    </ui:menu>
+                </div>
+            </div>
+
+            <!-- Data Tables -->
+            <aura:if isTrue="{!v.selectedView != ''}">
+                <div class="slds-p-top_medium"/>
+
+                <aura:if isTrue="{!v.selectedView == 'Use an Access Code'}">
+                    <h1 class="CB_headerLevel1">Access Code</h1>
+                    <aura:set attribute="else">
+                        <h1 class="CB_headerLevel1">{!v.selectedView}</h1>
+                    </aura:set>
+                </aura:if>
+
+                <aura:if isTrue="{!v.selectedView == 'Review My Access'}">
+                    <br/>
+                    <div class="CB_headerLevel2">1. Select Organization</div>
+                    <br/>
+                    <div>Which school or organization would you like to review?</div>
+                    <br/>
+                    <c:CC_SC_CustomLookup IconName="standard:account"
+                                          label=""
+                                          objectAPIName="Account"
+                                          selectedRecord="{!v.selectedRecord}"
+                                          sharingRule="WithSharing"
+                                          soslOverride="Select id, Name, BillingCity, BillingState From Account where Name LIKE: searchKey And (RecordType.Name = 'Customer Account' Or RecordType.Name = 'Prospect Account') order by Name Limit 50"
+                    />
+                    <br/>
+                    <lightning:button class="CB_largeButton" variant="brand" type="button"
+                                      label="Submit" onclick="{!c.processMyAccess}" disabled="{!v.boolMyAccessBtn}"/>
+                    <aura:if isTrue="{! v.boolShowMyAccess}">
+                        <br/><br/><br/>
+
+                        <div class="CB_headerLevel2">2. Review Access</div>
+                        <br/>
+                        <div>
+                            Here is a summary of your roles and responsibilities for <a href="{!'/'+v.selectedRecord.Id}"
+                            >{!v.selectedRecord.Name}</a>
+                        </div>
+                        <br/>
+
+                        <div class="CB_shadowBox">
+                            <div class="CB_headerLevel2">Trusted Agent</div>
+                            <br/>
+
+                            <aura:if isTrue="{!or(v.boolIsTrustedAgent, v.boolIsStateTrustedAgent)}">
+                                <aura:if isTrue="{!v.boolIsTrustedAgent}">
+                                <div>
+                                    You are, as trusted agent, authorized to interact with ACT on
+                                    <a href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a>'s behalf.
+                                    Trusted agents can manage users and user permissions associated to
+                                    success.act.org features for <a href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a>
+                                    and any organizations below it in the organization's hierarchy.
+                                </div>
+                                </aura:if>
+                                <aura:if isTrue="{!v.boolIsStateTrustedAgent}">
+                                    <div>
+                                        You are, as trusted agent, authorized to interact with ACT on
+                                        <a href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a>'s behalf.
+                                        Trusted agents can manage users and user permissions associated to
+                                        success.act.org features for <a href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a>.
+                                    </div>
+                                </aura:if>
+                                <br/>
+                                <div class="CB_shadowBox" style="background-color:#fef8dc;">
+                                    <lightning:icon iconName="utility:warning" alternativeText="Warning"
+                                                    variant="warning" size="small"/> &nbsp;
+                                    <b>Be careful!</b> Trusted agents have access to student data and can grant
+                                    others access to student data.
+                                </div>
+                                <aura:set attribute="else">
+                                    You are not a Trusted Agent for <a href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a>.
+                                </aura:set>
+                            </aura:if>
+                        </div>
+
+                            <aura:if isTrue="{!v.boolIsTestCoordinatorRole}">
+                                <br/><br/>
+                                <div class="CB_shadowBox">
+                                    <div class="CB_headerLevel2">Test Coordinator</div>
+                                    <br/>
+                                <div>
+                                    You are, as test coordinator, authorized to manage access to scoring data in PANext
+                                    for
+                                    contracts in which
+                                    <a href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a> participates.
+                                </div>
+                                <br/>
+                                <div class="CB_shadowBox" style="background-color:#fef8dc;">
+                                    <lightning:icon iconName="utility:warning" alternativeText="Warning"
+                                                    variant="warning" size="small"/> &nbsp;
+                                    <b>Be careful!</b> Test Coordinators have access to student data.
+                                </div>
+                                </div>
+                            </aura:if>
+
+                        <br/><br/>
+                        <div class="CB_shadowBox">
+                            <div class="CB_headerLevel2">Online Reporting</div>
+                            <br/>
+                            <aura:if isTrue="{!v.boolShowOnlineReport}">
+                                <div>You have the following access to view scores for <a
+                                            href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a></div>
+                                <lightning:formattedUrl value="{!v.knowledgeURL}" target="_blank" label="View table of access levels."/>
+                                <br/><br/>
+                                <div class="CB_shadowBox"
+                                     style="background-color:rgba(255, 255, 255, 1);border-style: solid;">
+                                    <fieldset class="slds-form-element slds-form-element_compound slds-form-element_address">
+                                        <aura:if isTrue="{!v.strEmetricRole == 'Admin-Full'}">
+                                            <div class="slds-text-heading_small" style="color:#0077AA;">
+                                                <aura:if isTrue="{!v.boolIsStateTrustedAgent}">
+                                                    Trusted Agent
+                                                </aura:if>
+                                                <aura:if isTrue="{!v.boolIsTrustedAgent}">
+                                                    Online Reporting User
+                                                </aura:if>
+                                                <!--<aura:set attribute="else">
+                                                    Online Reporting User
+                                                </aura:set>-->
+                                            </div>
+                                            <br/>
+                                            <span style="text-align: left">
+                                                Can see<br/>
+                                                <ul style="list-style-type: disc;padding-left:15px;">
+                                                    <li style="padding-left:0px;">
+                                                        Aggregate reports for the organization
+                                                    </li>
+                                                    <li style="padding-left:0px;">
+                                                        Aggregate reports for organizations underneath it in the hierarchy
+                                                    </li>
+                                                    <li style="padding-left:0px;">
+                                                        Details of an individual ACT test attempt
+                                                    </li>
+                                                    <li style="padding-left:0px;">
+                                                        Manage other users' access to this feature
+                                                    </li>
+                                                </ul>
+
+                                                <div class="slds-p-top_small"/>
+
+                                                <b>Can</b> see an examinee's name and personal information.
+                                            </span>
+
+                                        </aura:if>
+                                        <aura:if isTrue="{!v.strEmetricRole == 'Normal-Full'}">
+                                            <div class="slds-text-heading_small" style="color:#0077AA;">
+                                                Detail Viewer
+                                            </div>
+                                            <br/>
+                                            <span style="text-align: left">
+                                                Can see<br/>
+                                                <ul style="list-style-type: disc;padding-left:15px;">
+                                                    <li style="padding-left:0px;">
+                                                        Everything the Summary Viewer can
+                                                </li>
+                                                    <li style="padding-left:0px;">
+                                                        Details of an individual ACT test attempt<br/>
+                                                    </li>
+                                                </ul>
+
+                                                <div class="slds-p-top_small"/>
+
+                                                <b>Can</b> see an examinee's name and personal information.
+                                            </span>
+                                        </aura:if>
+                                        <aura:if isTrue="{!v.strEmetricRole == 'Normal-Limited'}">
+                                            <div class="slds-text-heading_small" style="color:#0077AA;">
+                                                Summary Viewer
+                                            </div>
+                                            <br/>
+                                            <span style="text-align: left">
+                                                Can see<br/>
+                                                <ul style="list-style-type: disc;padding-left:15px;">
+                                                    <li>
+                                                        Aggregate reports for the organization
+                                                    </li>
+                                                    <li>
+                                                        Aggregate reports for organizations underneath it in the hierarchy
+                                                    </li>
+                                                </ul>
+
+                                                <div class="slds-p-top_small"/>
+
+                                                <b>Cannot</b> see an examinee's name and personal information.
+                                            </span>
+                                        </aura:if>
+                                    </fieldset>
+                                </div>
+                                <aura:set attribute="else">
+                                    You do not have access to Online Reporting.
+                                </aura:set>
+                            </aura:if>
+                        </div>
+
+                        <br/><br/>
+                        <aura:if isTrue="{!not(v.boolIsStateTrustedAgent)}">
+                            <aura:if isTrue="{!v.enableEdFi}">
+                                <div class="CB_shadowBox">
+                                    <div class="CB_headerLevel2">Ed-Fi Reporting</div>
+                                    <br/>
+                                    <aura:if isTrue="{!v.boolShowEdFIReport}">
+                                        <div>
+                                            You have the following access to this feature for
+                                            <a href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a>
+                                        </div>
+                                        <br/>
+                                        <div class="CB_shadowBox" style="background-color:rgba(255, 255, 255, 1);border-style: solid;">
+                                            <fieldset
+                                                    class="slds-form-element slds-form-element_compound slds-form-element_address">
+                                                <div class="slds-text-heading_small" style="color:#0077AA;">Ed-Fi Reporting User
+                                                </div>
+
+                                                <div class="slds-form-element__control">
+                                                    You can manage technical configuration that connects to ACT's scoring
+                                                    data for <a href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a>.
+                                                    This includes details of an individual ACT test attempt along with an
+                                                    examinee's name and personal information.
+                                                </div>
+                                            </fieldset>
+                                        </div>
+                                        <aura:set attribute="else">
+                                            You do not have access to manage Ed-Fi configurations.
+                                        </aura:set>
+                                    </aura:if>
+                                </div>
+                            </aura:if>
+                        </aura:if>
+
+                        <br/>
+                        <lightning:button class="CB_largeButton" variant="brand" type="button"
+                                          label="Back to Dashboard" onclick="{!c.gotoDashboard}"
+                        />
+                    </aura:if>
+
+                </aura:if>
+                <aura:if isTrue="{!v.selectedView == 'Use an Access Code'}">
+                    <br/>
+                    <div class="CB_headerLevel2">
+
+                        <div style="position:relative">
+                            1. Validate Organization and Code
+                            <a href="javascript:void(0);"  aria-describedby="help" aria-disabled="true" title="Help">
+                                <div class="slds-popover slds-popover_tooltip slds-nubbin_bottom-left" role="tooltip" id="help" style="position:absolute;bottom:2.5rem;left:25rem;float: top;display:none;">
+                                    <div class="slds-popover__body">If you're having trouble finding the organization you're looking for, check the access code letter or email for the exact spelling of the organization.</div>
+                                </div>
+                                <lightning:icon class="slds-icon-text-default custom-icon" size="xx-small"
+                                                iconName="utility:info" onmouseover="{!c.actionMouseOver}" onmouseout="{!c.actionMouseOut}"/>
+                                <span class="slds-assistive-text">Help</span>
+                            </a>
+                        </div>
+                    </div>
+                    <br/>
+                    <div>Which school or organization is your access code for?</div>
+                    <br/>
+                    <c:CC_SC_CustomLookup IconName="standard:account"
+                                          label=""
+                                          objectAPIName="Account"
+                                          selectedRecord="{!v.selectedAccountRecord}"
+                                          sharingRule="WithoutSharing"
+                                          soslOverride="Select id, Name, BillingCity, BillingState From Account where Name LIKE: searchKey And Active__c = true And (RecordType.Name = 'Customer Account' Or RecordType.Name = 'Prospect Account') order by Name Limit 50"
+                    />
+                    <br/>
+                    <div class="slds-m-top--small">
+                        <div class="slds-grid" >
+                            <div class="slds-medium-size_5-of-12">
+                                <lightning:input class="slds-p-vertical_small" type="text" aura:id="accessToken"
+                                                 label="Your access code:" name="accessToken" value="{!v.accessCode}" maxlength="12"
+                                                 disabled="{! or(v.validateCount >= 3,v.boolDisableCodeSection)}"
+                                />
+                            </div>
+                            <div class="slds-medium-size_2-of-12">
+                            </div>
+                            <div class="slds-medium-size_5-of-12" style="padding-top: 2rem;s">
+                                <lightning:button class="custom_button"  variant="brand" type="button"
+                                                  label="Validate" onclick="{!c.validateAccessCode}" disabled="{! or(v.validateCount >= 3,v.boolDisableCodeSection)}"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    <aura:if isTrue="{!and(v.disableshowAccess,v.validateCount >= 3)}" >
+                        <br/>
+                        <div class="slds-medium-size_3-of-12">
+                            <lightning:button class="CB_largeButton"  variant="brand" type="button"
+                                              label="Submit" onclick="{!c.applyValidAccessToProfile}"/>
+                        </div>
+                    </aura:if>
+                    <br/><br/>
+                    <aura:if isTrue="{!v.trustedAgentType != ''}" >
+                        <div class="CB_headerLevel2">2. Review and Accept Access</div>
+                    </aura:if>
+
+                    <br/>
+                    <aura:if isTrue="{!v.trustedAgentType =='Trusted Agent'}" >
+                        <div>
+                            Access Code Type: <b>Trusted Agent</b>
+                        </div>
+                        <br/>
+                        <div>
+                            A trusted agent is authorized to interact with ACT on an organization's behalf. Trusted agents can manage users and user permissions associated to success.act.org features for the organization selected above and any organizations below it in the organization's hierarchy.
+                        </div>
+                        <br/>
+                        <div>
+                            Trusted Agents automatically gain access to all available features for an organization.
+                        </div>
+                        <br/>
+
+                        <div>
+                            <lightning:icon iconName="utility:warning" alternativeText="Approved" variant="error" />&nbsp;
+                            <b>Trusted agents have access to student data and can grant others access to student data.</b>
+                        </div>
+                        <br/>
+                    </aura:if>
+                    <aura:if isTrue="{!v.trustedAgentType =='State Trusted Agent'}" >
+                        <div>
+                            Access Code Type: <b>State Trusted Agent</b>
+                        </div>
+                        <br/>
+                        <div>
+                            A trusted agent is authorized to interact with ACT on an organization's behalf. Trusted agents can manage users and user permissions associated to success.act.org features for the organization selected above.
+                        </div>
+                        <br/>
+                        <div>
+                            Trusted Agents automatically gain access to all available features for an organization.
+                        </div>
+                        <br/>
+
+                        <div>
+                            <lightning:icon iconName="utility:warning" alternativeText="Approved" variant="error" />&nbsp;
+                            <b>Trusted agents have access to student data and can grant others access to student data.</b>
+                        </div>
+                        <br/>
+                    </aura:if>
+                    <aura:if isTrue="{!v.trustedAgentType =='State Online Reporting'}" >
+                        <div>
+                            Access Code Type: <b>State Online Reporting</b>
+                        </div>
+                        <br/>
+                        <div>
+                            State reporting users can access the online reporting records for <a href="{!'/'+v.selectedAccountRecord.Id}">{!v.selectedAccountRecord.Name}</a>.
+                        </div>
+                        <br/>
+                    </aura:if>
+                    <aura:if isTrue="{!v.trustedAgentType =='Ed-Fi Admin'}" >
+                        <div>
+                            Access Code Type: <b>Ed-Fi Admin</b>
+                        </div>
+                        <br/>
+                        <div>
+                            Ed-Fi managers can manage the settings that connect schools to ACT reporting data.
+                        </div>
+                        <br/>
+                    </aura:if>
+                    <aura:if isTrue="{!and(v.disableshowAccess,3 > v.validateCount )}" >
+                        <div class="slds-grid" >
+                            <div class="slds-medium-size_3-of-12">
+                                <lightning:button class="custom_button"  variant="brand" type="button"
+                                                  label="Confirm Code" onclick="{!c.applyValidAccessToProfile}"/>
+                            </div>
+                            <div class="slds-medium-size_5-of-12">
+                                <lightning:button class="custom_button" type="button" variant="neutral"
+                                                  label="Cancel" onclick="{!c.clearInputsAfterValidate}"/>
+                            </div>
+                        </div>
+                    </aura:if>
+                </aura:if>
+
+                <!--Request More Access Section-->
+                <aura:if isTrue="{!v.selectedView == 'Request More Access'}">
+
+                    <!--Header section to select organization-->
+                    <br/>
+                    <div class="CB_headerLevel2">1. Select Organization</div>
+                    <br/>
+                    <div>Which school or organization do you need access for?</div>
+                    <br/>
+                    <c:CC_SC_CustomLookup IconName="standard:account"
+                                          label=""
+                                          objectAPIName="Account"
+                                          selectedRecord="{!v.selectedRecord}"
+                                          sharingRule="WithoutSharing"
+                                          soslOverride="Select id, Name, BillingCity, BillingState, eMetric_Org_Type__c From Account where Name LIKE: searchKey And Active__c = true And (RecordType.Name = 'Customer Account' Or RecordType.Name = 'Prospect Account') order by Name Limit 50"
+                    />
+                    <br/>
+
+                    <!--Buttton to fetch existing access levels and display second section which helps to add more access.-->
+                    <lightning:button class="CB_largeButton" variant="brand" type="button"
+                                      label="Submit" onclick="{!c.processRequestForMoreAccess}" disabled="{!v.boolMyAccessBtn}"/>
+
+                    <!--Second section which allows user to add more access.-->
+                    <aura:if isTrue="{!v.boolRequestMoreAccess}">
+                        <br/><br/><br/>
+                        <div class="CB_headerLevel2">2. Review Access</div>
+                        <br/>
+                        <div>
+                            Please select the roles and responsibilities you require for <a href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a>:
+                        </div>
+                        <br/>
+
+                        <!-- Trusted Agent Section-->
+                        <div class="CB_shadowBox">
+                            <span class="CB_headerLevel2">
+                                Trusted Agent
+                            </span>
+
+                            <!--If user is already a trusted agent, this section will be displayed-->
+                            <aura:if isTrue="{!v.boolIsTrustedAgent}">
+                                <br/>
+                                <div class="slds-text-color_success">
+                                    <b> You are currently a Trusted Agent for {!v.selectedRecord.Name}.</b>
+                                </div>
+                                <br/>
+                            </aura:if>
+
+                            <!--Section to select/deselect trusted agent access - start-->
+                            <div class="slds-p-top_xx-small"/>
+                            A trusted agent is authorized to interact with ACT on an organization's behalf.
+                            Trusted agents can manage users and user permissions associated to success.act.org
+                            features for the organization selected above
+                            <aura:if isTrue="{!v.selectedRecord.eMetric_Org_Type__c == 'S'}">
+                                <span>.</span>
+                            </aura:if>
+                            <aura:if isTrue="{!v.selectedRecord.eMetric_Org_Type__c != 'S'}">
+                                and any organizations below it in the organization's hierarchy.
+                            </aura:if>
+
+                            <br/>
+
+                            <div class="slds-p-top_xx-small"/>
+
+                            <div style="padding:15px;">
+                                <div class="CB_orangeBox">
+                                    <lightning:icon  class="icn" iconName="utility:warning" size="small" alternativeText="Be careful!"/>&nbsp;&nbsp;
+                                    <b>Be careful!</b> Trusted agents have access to student data and can grant others access to student data.
+                                </div>
+                            </div>
+
+                            <div class="slds-p-top_xx-small"/>
+
+                            <div>
+                                <dl class="slds-list_inline slds-wrap" style="color:black;">
+                                    <lightning:input aura:id="makeTrustedAgent"
+                                                     checked="{!v.makeTrustedAgent}"
+                                                     class="CB_checkBoxLabelLeft"
+                                                     id="makeTrustedAgent"
+                                                     label=""
+                                                     name="Make Trusted Agent"
+                                                     onchange="{!c.toggleMoreAccessBtn}"
+                                                     type="checkbox"
+                                                     disabled="{! v.boolIsTrustedAgent}"
+                                    />
+                                    <label style="{!v.makeTrustedAgent ? 'color:#5a5a5a' : 'color:#262424'}">{!'Request Trusted Agent role for ' + v.selectedRecord.Name + '.'}</label>
+                                </dl>
+                            </div>
+                            <!--Section to select/deselect trusted agent access - end-->
+                        </div>
+
+                        <div class="slds-p-top_large"/>
+
+                        <!-- Online Reporting section - start-->
+                        <div class="CB_shadowBox">
+                            <h1 class="CB_headerLevel2">
+                                Online Reporting
+                            </h1>
+
+                            <div class="slds-p-top_xx-small"/>
+
+                            <!--If user is already a online reporting user, this section will be displayed-->
+                            <aura:if isTrue="{!v.boolShowOnlineReport}">
+                                <div class="slds-text-color_success">
+                                    <aura:if isTrue="{!v.strEmetricRole == 'Normal-Full'}">
+                                        <br/><b> You are currently a Detail Viewer for {!v.selectedRecord.Name}.</b>
+                                    </aura:if>
+                                    <aura:if isTrue="{!v.strEmetricRole == 'Normal-Limited'}">
+                                        <br/><b> You are currently a Summary Viewer for {!v.selectedRecord.Name}.</b>
+                                    </aura:if>
+                                </div>
+                                <br/>
+                            </aura:if>
+
+                            <!--If user is already a trusted agent user not allowed to select online reporting access.-->
+                            <aura:if isTrue="{!v.makeTrustedAgent}">
+                                Trusted agents have full access to online reporting for {!v.selectedRecord.Name}.
+                                This includes details of an individual ACT test attempt along with an examinee's name and personal information. To protect student privacy, only grant detailed viewing access to users who need it.
+                                <div>
+                                    <lightning:formattedUrl value="{!v.knowledgeURL}" target="_blank" label="View table of access levels."/>
+                                </div>
+                                <br/>
+
+                                <lightning:input checked="true"
+                                                 class="CB_checkBoxLabelLeft"
+                                                 disabled="true"
+                                                 label="{!'Request Trusted Agent role for ' + v.selectedRecord.Name}"
+                                                 type="checkbox"
+                                />
+                                <br/>
+
+                                <!--Section to select/deselect online reporting access - start-->
+                                <aura:set attribute="else">
+                                    Select the role you require to data access level. To protect student privacy, only grant detailed viewing access to users who need it.
+                                    <br/>
+                                    <lightning:formattedUrl value="{!v.knowledgeURL}" target="_blank" label="View table of access levels."/>
+                                    <br/>
+
+                                    <div class="slds-show--medium">
+                                        <div class="slds-p-top_xx-small"/>
+
+                                        <div style="padding:15px;">
+                                            <h1 class="CB_headerLevel3">
+                                                Select an option
+                                            </h1>
+
+                                            <div class="slds-p-top_xx-small"/>
+
+                                            <fieldset class="slds-form-element">
+                                                <div class="slds-form-element__control">
+                                                    <div class="slds-visual-picker slds-visual-picker_medium">
+                                                        <input aura:id="checkedDVBig" type="radio" id="checkedDVBig" onclick="{!c.pickOLR}" checked="{!v.checkedDV}" name="bigOptions" />
+                                                        <label for="checkedDVBig">
+                                                            <span class="slds-visual-picker__figure slds-visual-picker__text" style="width:400px;padding:15px;">
+                                                                <span>
+                                                                    <span class="CB_headerLevel3 CB_blueText">
+                                                                        Detail Viewer
+                                                                    </span>
+                                                                    <span style="text-align: left">
+                                                                        Can see<br/>
+                                                                        <ul style="list-style-type: disc;padding-left:15px;">
+                                                                            <li style="padding-left:0px;">
+                                                                                Everything the Summary Viewer can
+                                                                            </li>
+                                                                            <li style="padding-left:0px;">
+                                                                                Details of an individual ACT test attempt<br/>
+                                                                            </li>
+                                                                        </ul>
+
+                                                                        <div class="slds-p-top_small"/>
+
+                                                                        <b>Can</b> see an examinee's name and personal information.
+                                                                    </span>
+                                                                </span>
+                                                            </span>
+                                                            <span class="slds-icon_container slds-visual-picker__text-check">
+                                                                <div style="padding-top:4px;padding-left:2px;">
+                                                                    <lightning:icon class="whiteicon" iconName="utility:check" size="xx-small"/>
+                                                                </div>
+                                                            </span>
+                                                        </label>
+                                                    </div>
+                                                    <div class="slds-visual-picker slds-visual-picker_medium">
+                                                        <input aura:id="checkedSVBig" type="radio" id="checkedSVBig" checked="{!v.checkedSV}" onclick="{!c.pickOLR}" name="bigOptions" />
+                                                        <label for="checkedSVBig">
+                                                            <span class="slds-visual-picker__figure slds-visual-picker__text" style="width:400px;padding:15px;">
+                                                                <span>
+                                                                    <span class="CB_headerLevel3 CB_blueText">
+                                                                        Summary Viewer
+                                                                    </span>
+                                                                    <span style="text-align: left">
+                                                                        Can see<br/>
+                                                                        <ul style="list-style-type: disc;padding-left:15px;">
+                                                                            <li>
+                                                                                Aggregate reports for the organization
+                                                                            </li>
+                                                                            <li>
+                                                                                Aggregate reports for organizations underneath it in the hierarchy
+                                                                            </li>
+                                                                        </ul>
+
+                                                                        <div class="slds-p-top_small"/>
+
+                                                                        <b>Cannot</b> see an examinee's name and personal information.
+                                                                    </span>
+                                                                </span>
+                                                            </span>
+                                                            <span class="slds-icon_container slds-visual-picker__text-check">
+                                                                <div style="padding-top:4px;padding-left:2px;">
+                                                                    <lightning:icon class="whiteicon" iconName="utility:check" size="xx-small"/>
+                                                                </div>
+                                                            </span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </fieldset>
+                                        </div>
+                                    </div>
+                                </aura:set>
+                                <!--Section to select/deselect online reporting access - end-->
+                            </aura:if>
+                        </div>
+                        <!-- Online Reporting section - end-->
+                        <div class="slds-p-top_large"/>
+                        <aura:if isTrue="{!and(v.enableEdFi, v.selectedRecord.eMetric_Org_Type__c != 'S')}">
+                            <!-- Ed-Fi Section - start-->
+                            <div class="CB_shadowBox">
+                            <span class="CB_headerLevel2">
+                                Ed-Fi Reporting
+                            </span>
+
+                                <div class="slds-p-top_xx-small"/>
+
+                                <!--If user is already a ED-FI user, this section will be displayed..-->
+                                <aura:if isTrue="{!v.boolShowEdFIReport}">
+                                    <br/>
+                                    <div class="slds-text-color_success">
+                                        <b> You are currently a Ed-Fi Reporting user for {!v.selectedRecord.Name}.</b>
+                                    </div>
+                                    <br/>
+                                </aura:if>
+
+                                <!--Section to select/deselect ED-FI access - start-->
+                                Ed-Fi administrators manage technical configuration that connects to ACT's scoring data for <a href="{!'/'+v.selectedRecord.Id}">{!v.selectedRecord.Name}</a>.
+                                This includes details of an individual ACT test attempt along with an examinee's name and personal information.
+                                <br/>
+
+                                <div class="slds-p-top_small"/>
+
+                                <div>
+                                    <aura:if isTrue="{!!v.makeTrustedAgent}">
+                                        <lightning:input aura:id="makeEdFi"
+                                                         checked="{!v.makeEdFi}"
+                                                         class="CB_checkBoxLabelLeft"
+                                                         id="makeEdFi"
+                                                         label=""
+                                                         name="Include Ed-Fi Reporting"
+                                                         onchange="{!c.toggleMoreAccessBtn}"
+                                                         type="checkbox"
+                                                         disabled="{!v.boolShowEdFIReport}"
+                                        />
+                                        <label style="{!v.makeEdFi ? 'color:#5a5a5a' : 'color:#262424'}">{!'Request Ed-Fi Administrator role for ' + v.selectedRecord.Name}</label>
+                                    </aura:if>
+                                    <aura:if isTrue="{!v.makeTrustedAgent}">
+                                        <lightning:input aura:id="makeEdFi"
+                                                         checked="true"
+                                                         class="CB_checkBoxLabelLeft"
+                                                         disabled="true"
+                                                         id="makeEdFi"
+                                                         label="{!'Request Ed-Fi Administrator role for ' + v.selectedRecord.Name}"
+                                                         name="Include Ed-Fi Reporting"
+                                                         type="checkbox"
+                                        />
+                                    </aura:if>
+                                    <br/>
+                                </div>
+                                <!--Section to select/deselect ED-FI access - end-->
+                                <div class="slds-hide--medium">
+                                    <br/>
+                                </div>
+                            </div>
+                        </aura:if>
+
+                        <!-- Ed-Fi Section - end-->
+                        <!-- Test Accommodations section - start -->
+                        <div class="slds-p-top_large"/>
+
+                        <aura:if isTrue="{!and(v.enableTAA,v.selectedRecord.eMetric_Org_Type__c != 'S')}">
+                            <div class="CB_shadowBox">
+                                <span class="CB_headerLevel2">
+                                    Test Accommodations
+                                </span>
+
+                                <div class="slds-p-top_xx-small"/>
+
+                                <!--If user is already has TAA access, this section will be displayed..-->
+                                <aura:if isTrue="{!v.boolShowTAARole}">
+                                    <br/>
+                                    <div class="slds-text-color_success">
+                                        <b> You are currently a Test Accommodation user for {!v.selectedRecord.Name}.</b>
+                                    </div>
+                                    <br/>
+                                </aura:if>
+
+                                <!--Section to select/deselect TAA access - end-->
+                                Test Accommodations Coordinators (TACs) are able to submit
+                                requests and reconsiderations for students who may need accommodations or EL
+                                supports to access the ACT for the organization selected above and any
+                                organizations below it in the organization's hierarchy.
+                                <br/>
+
+                                <div class="slds-p-top_small"/>
+
+                                <div style="padding:15px;">
+                                    <div class="CB_orangeBox">
+                                        <lightning:icon  class="icn" iconName="utility:warning" size="small" alternativeText="Be careful!"/>&nbsp;&nbsp;
+                                        <b>Be careful!</b> TACs have access to confidential student information.
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <aura:if isTrue="{!!v.makeTrustedAgent}">
+                                        <lightning:input aura:id="makeTAA"
+                                                         checked="{!v.makeTAA}"
+                                                         class="CB_checkBoxLabelLeft"
+                                                         id="makeTAA"
+                                                         label=""
+                                                         name="Include Test Accommodations"
+                                                         onchange="{!c.toggleMoreAccessBtn}"
+                                                         type="checkbox"
+                                                         disabled="{!v.boolShowTAARole}"
+                                        />
+                                        <label style="{!v.makeTAA ? 'color:#5a5a5a' : 'color:#262424'}">
+                                            {!'Request access to manage accommodation requests on behalf of the students of  ' + v.selectedRecord.Name}
+                                        </label>
+                                    </aura:if>
+                                    <aura:if isTrue="{!v.makeTrustedAgent}">
+                                        <lightning:input aura:id="makeTAA"
+                                                         checked="true"
+                                                         class="CB_checkBoxLabelLeft"
+                                                         disabled="true"
+                                                         id="makeTAA"
+                                                         label="{!'Request access to manage accommodation requests on behalf of the students of ' + v.selectedRecord.Name}"
+                                                         name="Include Test Accommodations"
+                                                         type="checkbox"
+                                        />
+                                    </aura:if>
+                                    <br/>
+                                </div>
+                                <!--Section to select/deselect TAA access - end-->
+                                <!-- Show extra space on mobile devices to prevent the gray box from being too small -->
+                                <div class="slds-hide--medium">
+                                    <br/>
+                                    <br/>
+                                </div>
+                            </div>
+                        </aura:if>
+                        <!-- Test Accommodations section - end -->
+                        <br/><br/>
+                        <!--Button to apply requested access levels.-->
+                        <lightning:button class="CB_largeButton" variant="brand" type="button"
+                                          label="Request Access" onclick="{!c.applyRequestedAccess}"
+                                          disabled="{!v.boolDisableReqMoreBtn}"/>
+
+                        <!--Button to cancel transaction and navigate back to dashboard.-->
+                        <lightning:button class="CB_largeButton" type="button"
+                                          label="Cancel" onclick="{!c.gotoDashboard}"/>
+                    </aura:if>
+                </aura:if>
+            </aura:if>
+            <aura:if isTrue="{!v.selectedView == ''}">
+                <br/>
+                <lightning:button class="CB_largeButton" variant="brand" type="button"
+                                  label="Back to Dashboard" onclick="{!c.gotoDashboard}"/>
+            </aura:if>
+        </div>
+    </section>
+
+    <lightning:spinner aura:id="loadingSpinner" variant="brand" size="medium" class="slds-hide"/>
+
+</aura:component>
