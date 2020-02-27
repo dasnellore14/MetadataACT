@@ -1,0 +1,262 @@
+/**
+ * Created by adamsm on 4/10/2019.
+ */
+
+public without sharing class ACT_GEN_HierarchyFunctionsQueue implements Queueable {
+    //////////////////////////////
+    // Internal Variables
+    //////////////////////////////
+    private string strQueueType;
+    private set<Id> setUserContacts;
+
+    public ACT_GEN_HierarchyFunctionsQueue(string QueueType, set<Id> UserContactIds) {
+        strQueueType = QueueType;
+        setUserContacts = UserContactIds;
+    }
+
+    //////////////////////////////
+    // Execute
+    //////////////////////////////
+    public void execute(QueueableContext context) {
+        switch on strQueueType {
+            when 'PermissionSets' {
+                setPermissionSets(setUserContacts);
+            }
+        }
+    }
+
+    //////////////////////////////
+    // Private Functions
+    //////////////////////////////
+    // Grant/remove permission sets based on the relationship of the contact to accounts
+    private static void setPermissionSets(set<Id> ContactSet) {
+        try {
+            // Get/map the appropriate permission sets
+            set<string> setPSNames = new set<string>{
+                    'SAO_Ed_Fi_Admin', 'SAO_Online_Reporting_User', 'SAO_State_User', 'SAO_TAA', 'SAO_Trusted_Agent','SAO_Test_Coordinator'
+            };
+
+            map<string, id> mapPSNamesToId = new map<string, id>();
+
+            // Create a map to hold which users should have which permission sets.
+            // Status:
+            //     Existing = Should be removed
+            //     New = Should be added
+            //     Confirmed = No change
+            map<id, map<id, String>> mapACRPSStatus = new map<id, map<id, String>>();
+            map<id, string> mapUserTemp;
+
+            list<PermissionSet> lstPS = [
+                    SELECT
+                            Id,
+                            Name
+                    FROM
+                            PermissionSet
+                    WHERE
+                            Name In :setPSNames
+            ];
+
+            for (PermissionSet thisPS : lstPS) {
+                mapPSNamesToId.put(thisPS.Name, thisPS.Id);
+            }
+
+            system.debug(string.valueOf(mapPSNamesToId));
+
+            // Get the users for the passed in contact
+            list<User> lstUsers =
+            [
+                    SELECT
+                            Id,
+                            ContactId
+                    FROM
+                            User
+                    WHERE
+                            ContactId in: ContactSet
+            ];
+
+            system.debug('Users = ' + string.valueOf(lstUsers.size()));
+
+            map<Id, Id> mapContactToUsers = new map<Id, Id>();
+
+            for (User thisUser : lstUsers) {
+                mapContactToUsers.put(thisUser.ContactId, thisUser.Id);
+            }
+
+            // Get the existing permission sets for the users affected by the ACR changes
+            list<PermissionSetAssignment> lstPSA = [
+                    SELECT
+                            AssigneeId,
+                            PermissionSetId
+                    FROM
+                            PermissionSetAssignment
+                    WHERE
+                            AssigneeId In: mapContactToUsers.values()
+                            And PermissionSetId In:mapPSNamesToId.values()
+            ];
+
+            system.debug('Existing Permission Sets = ' + string.valueOf(lstPSA.size()));
+
+            // Populate the map with a default of false (remove the permission set)
+            for (PermissionSetAssignment thisPSA : lstPSA) {
+                mapUserTemp = mapACRPSStatus.get(thisPSA.AssigneeId);
+
+                if (mapUserTemp == null) {
+                    mapUserTemp = new map<id, string>();
+                }
+
+                mapUserTemp.put(thisPSA.PermissionSetId, 'Existing');
+
+                mapACRPSStatus.put(thisPSA.AssigneeId, mapUserTemp);
+            }
+
+            // Get all the active ACRs for the same users
+            list<AccountContactRelation> lstACR = [
+                    SELECT
+                            ContactId,
+                            Ed_Fi_Role__c,
+                            Success_Community_Role__c,
+                            eMetrics_Role__c,
+                            TAA_Role__c,
+                            PANext_Role__c,
+                            Account.eMetric_Org_Type__c
+                    FROM
+                            AccountContactRelation
+                    WHERE
+                            ContactId in: ContactSet
+                            And IsActive = true
+            ];
+
+            system.debug('Active ACRs = ' + string.valueOf(lstACR.size()));
+
+            // Flag the map as true, if appropriate (has a reason to have the permission set)
+            for (AccountContactRelation thisACR : lstACR) {
+                Id idUser = mapContactToUsers.get(thisACR.ContactId);
+                mapUserTemp = mapACRPSStatus.get(idUser);
+
+                if (mapUserTemp == null) {
+                    mapUserTemp = new map<id, string>();
+                }
+
+                // Check for Ed-Fi, having any value allows the SAO_Ed_Fi_Admin permission set
+                if (thisACR.Ed_Fi_Role__c != null) {
+                    SetPSStatus(mapUserTemp, mapPSNamesToId, 'SAO_Ed_Fi_Admin');
+                }
+
+                // Check for TAA, having any value allows the SAO_TAA permission set
+                if (thisACR.TAA_Role__c != null) {
+                    SetPSStatus(mapUserTemp, mapPSNamesToId, 'SAO_TAA');
+                }
+
+                // Check for Test Coordinator, having any value allows the Test_Coordinator permission set
+                if (thisACR.PANext_Role__c != null && thisACR.PANext_Role__c.contains('Test Coordinator')) {
+                    SetPSStatus(mapUserTemp, mapPSNamesToId, 'SAO_Test_Coordinator');
+                    SetPSStatus(mapUserTemp, mapPSNamesToId, 'SAO_Online_Reporting_User');
+                }
+
+                // Check for a trusted agent
+                if (thisACR.Success_Community_Role__c == 'Trusted Agent' && thisACR.Account.eMetric_Org_Type__c != 'S') {
+                    SetPSStatus(mapUserTemp, mapPSNamesToId, 'SAO_Trusted_Agent');
+                }
+
+                // Check for an online reporting user
+                if (thisACR.Success_Community_Role__c == 'Standard' && thisACR.Account.eMetric_Org_Type__c != 'S') {
+                    SetPSStatus(mapUserTemp, mapPSNamesToId, 'SAO_Online_Reporting_User');
+                }
+
+                // Check for a state user
+                if (thisACR.Success_Community_Role__c != null && thisACR.Account.eMetric_Org_Type__c == 'S') {
+                    if(thisACR.Success_Community_Role__c=='State Trusted Agent' && thisACR.eMetrics_Role__c=='Admin-Full'){
+                        SetPSStatus(mapUserTemp, mapPSNamesToId, 'SAO_Online_Reporting_User');
+                        SetPSStatus(mapUserTemp, mapPSNamesToId, 'SAO_Trusted_Agent');
+                    }else{
+                        SetPSStatus(mapUserTemp, mapPSNamesToId, 'SAO_State_User');
+                    }
+                }
+
+                mapACRPSStatus.put(idUser, mapUserTemp);
+            }
+
+            // Look for permission sets that need to be removed
+            list<PermissionSetAssignment> lstPSARemove = new list<PermissionSetAssignment>();
+
+            for (PermissionSetAssignment thisPSA : lstPSA) {
+                mapUserTemp = mapACRPSStatus.get(thisPSA.AssigneeId);
+
+                if (mapUserTemp.get(thisPSA.PermissionSetId) == 'Existing') {
+                    lstPSARemove.add(thisPSA);
+
+                    system.debug('Remove permission ' + thisPSA.PermissionSetId + ' from user ' + thisPSA.AssigneeId);
+                }
+            }
+
+            if (lstPSARemove.size() > 0) {
+                delete lstPSARemove;
+            }
+
+            // Look for permission sets that need to be added
+            list<PermissionSetAssignment> lstPSAAdd = new list<PermissionSetAssignment>();
+
+            for (Id thisUser : mapACRPSStatus.keySet()) {
+                mapUserTemp = mapACRPSStatus.get(thisUser);
+
+                if (mapUserTemp != null) {
+                    for (Id thisPSId : mapUserTemp.keySet()) {
+                        if (mapUserTemp.get(thisPSId) == 'New') {
+                            PermissionSetAssignment newPSA = new PermissionSetAssignment();
+
+                            newPSA.AssigneeId = thisUser;
+                            newPSA.PermissionSetId = thisPSId;
+
+                            system.debug('Add permission ' + newPSA.PermissionSetId + ' to user ' + newPSA.AssigneeId);
+
+                            lstPSAAdd.add(newPSA);
+                        }
+                    }
+                }
+            }
+
+            if (lstPSAAdd.size() > 0) {
+                // On create, might attempt duplicated, use the try/catch to ignore those
+                try {
+                    insert lstPSAAdd;
+                }
+                catch (Exception exInsert) {
+                    if (!exInsert.getMessage().contains('DUPLICATE_VALUE')) {
+                        CC_SC_ERR_EventLogger.LogSingleError(exInsert, null, 'Error', null, 'Inserting permission sets.', exInsert.getMessage(), '', '', '');
+                    }
+                }
+            }
+
+            system.debug('setPermissionSets exited normally.');
+        }
+        catch (Exception ex) {
+            system.debug('Exception occurred >>>>> ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', null, 'Processing setPermissionSets.', ex.getMessage(), '', '', '');
+        }
+    }
+
+    private static void SetPSStatus(map<Id, String> UserMap, map<String, Id> PSMap, String PermissionName) {
+        // Get the id for the permission set
+        id PSId = PSMap.get(PermissionName);
+
+        // Look for an existing status
+        string strStatus = UserMap.get(PSId);
+
+        // Return the new status
+        switch on strStatus {
+            when 'Existing', 'Confirmed' {
+                strStatus = 'Confirmed';
+            }
+
+            when 'New' {
+                strStatus = 'New';
+            }
+
+            when else {
+                strStatus = 'New';
+            }
+        }
+
+        UserMap.put(PSId, strStatus);
+    }
+}
