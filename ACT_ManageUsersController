@@ -1,0 +1,1250 @@
+/**
+* Created by adamsm on 5/2/2019.
+*/
+
+public without sharing class ACT_ManageUsersController {
+    @AuraEnabled
+    // Check if the user has the trusted agent permission set
+    public static PageInitialize intitializePage() {
+        PageInitialize objReturn = new PageInitialize();
+
+        // Check for an administrator
+        if (ACT_CommunityBaseController.UserProfileName(UserInfo.getUserId()) == 'System Administrator') {
+            objReturn.HasPermission = true;
+        }
+        else {
+            // Get the permissions and return them
+            objReturn.HasPermission = ACT_CommunityBaseController.UserHasPermissionSet(UserInfo.getUserId(), 'SAO_Trusted_Agent');
+        }
+
+        // Get the knowledge article link
+        objReturn.KnowledgeURL = ACT_CommunityBaseController.CommunityBaseURL() + '/s/article/Summary-of-Online-Reporting-Access-Levels';
+
+        // Check if options are enabled.  Note Ed-Fi/TAA access is determined by the org type, and is in loadACRRecords
+        ACT_Success_Toggles__c toggleSettings = ACT_Success_Toggles__c.getOrgDefaults();
+
+        objReturn.EnableAddAccess = (toggleSettings != null && toggleSettings.Enable_Add_Access_On_Manage_Users__c == true);
+        objReturn.EnableStateAndDistrict = (toggleSettings != null && toggleSettings.SAO_State_and_District__c == true);
+
+        return objReturn;
+    }
+
+    @AuraEnabled
+    public static AccessRecordsWrapper loadAccessRecords(string ViewType, integer MaxRows) {
+        try {
+            // Initialize variables
+            AccessRecordsWrapper objReturn = new AccessRecordsWrapper();
+            String strQuery = 'SELECT Id,Requested_Roles__c, Account__r.Name, Community_Contact__r.Name, CreatedDate, Email_Address__c, eMetrics_Role__c, Evaluated_By__r.Name, Expiration_Date__c, Grantor__r.Name, Type__c FROM Access__c ';
+            String strOrderBy;
+
+            objReturn.AllRecordsLoaded = true;
+            objReturn.HideCheckboxes = true;
+
+            // Branch based on the View Type
+            switch on ViewType {
+                when 'Accepted Invitations' {
+                    strQuery += 'WHERE Status__c = \'Accepted\' And Type__c =\'Grant\'';
+                    strOrderBy = 'Expiration_Date__c Desc';
+                    objReturn.LazyLoading = true;
+                    objReturn.ViewInstructions = '';
+                }
+
+                when 'Approved Requests' {
+                    strQuery += 'WHERE Status__c = \'Approved\' And Type__c =\'Request\'';
+                    strOrderBy = 'CreatedDate Desc';
+                    objReturn.LazyLoading = true;
+                    objReturn.SortDirection = 'desc';
+                    objReturn.SortField = 'RequestDate';
+                    objReturn.ViewInstructions = '';
+                }
+
+                when 'Cancelled Invitations' {
+                    strQuery += 'WHERE Status__c = \'Cancelled\' And Type__c =\'Grant\'';
+                    strOrderBy = 'CreatedDate Desc';
+                    objReturn.LazyLoading = true;
+                    objReturn.ViewInstructions = '';
+                }
+
+                when 'Expired Invitations' {
+                    strQuery += 'WHERE Status__c = \'Expired\' And Type__c =\'Grant\'';
+                    strOrderBy = 'CreatedDate Desc';
+                    objReturn.LazyLoading = true;
+                    objReturn.ViewInstructions = '';
+                }
+
+                when 'Open Invitations' {
+                    strQuery += 'WHERE Status__c = \'Open\' And Type__c = \'Grant\'';
+                    strOrderBy = 'Expiration_Date__c Asc';
+                    objReturn.HideCheckboxes = false;
+                    objReturn.LazyLoading = false;
+                    objReturn.SortDirection = 'asc';
+                    objReturn.SortField = 'ExpirationDate';
+                    objReturn.ViewInstructions = 'Select the invitations you would like to cancel or extend and select the appropriate button below. ';
+                }
+
+                when 'Open Access Requests' {
+                    strQuery += 'WHERE Status__c = \'Open\' And Type__c = \'Request\'';
+                    strOrderBy = 'CreatedDate Asc';
+                    objReturn.HideCheckboxes = false;
+                    objReturn.LazyLoading = false;
+                    objReturn.SortDirection = 'asc';
+                    objReturn.SortField = 'RequestDate';
+                    objReturn.ViewInstructions = 'Select the requests you would like to approve or reject and select the appropriate button below.';
+                }
+
+                when 'Rejected Requests' {
+                    strQuery += 'WHERE Status__c = \'Rejected\' And Type__c =\'Request\'';
+                    strOrderBy = 'CreatedDate Desc';
+                    objReturn.LazyLoading = true;
+                    objReturn.SortDirection = 'desc';
+                    objReturn.SortField = 'RequestDate';
+                    objReturn.ViewInstructions = '';
+                }
+
+                when else {
+                    throw new ImportException('Unknown ViewType = ' + ViewType);
+                }
+            }
+
+            // Get the accounts the user is a Trusted Agent for
+            map<id, string> mapTA = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToRoleMapForUser(UserInfo.getUserId(), true, 'Trusted Agent');
+            map<id, string> mapSTA = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToRoleMapForUser(UserInfo.getUserId(), true, 'State Trusted Agent');
+            set<id> setAccounts = new set<id>();
+            setAccounts.addAll(mapTA.keySet());
+            setAccounts.addAll(mapSTA.keySet());
+
+            strQuery += ' AND Account__c In: setAccounts';
+
+            // Add the order by, if applicable
+            if (strOrderBy != null) {
+                strQuery += ' ORDER BY ' + strOrderBy;
+            }
+
+            // Add the max rows limit, if lazy loading is turned on
+            if (objReturn.LazyLoading) {
+                strQuery += ' LIMIT ' + string.valueOf(MaxRows + 1);
+            }
+            else {
+                MaxRows = 9999;
+            }
+
+            system.debug(strQuery);
+
+            list<Access__c> lstAccess = Database.Query(strQuery);
+
+            system.debug('Access records = ' + lstAccess.size());
+            system.debug('setAccounts = ' + setAccounts);
+
+            // Loop through and create the AccessValue records
+            if (lstAccess != null) {
+                // Create a holder for missing contacts
+                map<String, Id> mapMissingContacts = new map<String, Id>();
+
+                // If the view type is "Accepted Invitations", look for access records that don't have contacts, but do have email addresses
+                if (ViewType == 'Accepted Invitations') {
+                    set<String> setMissingContacts = new set<String>();
+
+                    for (integer intX = 0; (intX < MaxRows && intX < lstAccess.size()); intX++) {
+                        Access__c thisA = lstAccess[intX];
+
+                        if (thisA.Community_Contact__c == null && thisA.Email_Address__c != null) {
+                            setMissingContacts.add(thisA.Email_Address__c);
+                        }
+                    }
+
+                    // Load and map the missing contacts
+                    List<Contact> lstMissingContacts = [
+                            SELECT
+                                    Id,
+                                    Email
+                            FROM
+                                    Contact
+                            WHERE
+                                    Email in:setMissingContacts
+                    ];
+
+                    for (Contact thisC : lstMissingContacts) {
+                        mapMissingContacts.put(thisC.Email, thisC.Id);
+                    }
+                }
+
+                // Check if all records are loaded
+                if (lstAccess.size() > MaxRows) {
+                    objReturn.AllRecordsLoaded = false;
+                }
+
+                // Don't send the last record, in the case of rows > max rows
+                for (integer intX = 0; (intX < MaxRows && intX < lstAccess.size()); intX++) {
+                    AccessValue newA = new AccessValue();
+                    Access__c thisA = lstAccess[intX];
+
+                    newA.AccessId = thisA.Id;
+                    newA.ContactName = thisA.Community_Contact__r.Name;
+                    newA.ContactLink = ACT_CommunityBaseController.CommunityBaseURL() + '/' + thisA.Community_Contact__c;
+                    newA.EmailAddress = thisA.Email_Address__c;
+                    newA.ExpirationDate = thisA.Expiration_Date__c;
+                    newA.EvaluatedBy = thisA.Evaluated_By__r.Name;
+                    newA.Grantor = thisA.Grantor__r.Name;
+                    newA.Organization = thisA.Account__r.Name;
+                    newA.OrganizationLink = ACT_CommunityBaseController.CommunityBaseURL() + '/' + thisA.Account__c;
+                    newA.RequestDate = thisA.CreatedDate;
+                    newA.RequestedRole = thisA.Requested_Roles__c == null ? '' : thisA.Requested_Roles__c;
+                    newA.Type = thisA.Type__c;
+
+                    // Look for missing contacts
+                    if (ViewType == 'Accepted Invitations' && thisA.Community_Contact__c == null) {
+                        Id thisC = mapMissingContacts.get(thisA.Email_Address__c);
+
+                        if (thisC != null) {
+                            newA.ContactLink = ACT_CommunityBaseController.CommunityBaseURL() + '/' + thisC;
+                        }
+                    }
+
+                    objReturn.AccessRecords.add(newA);
+                    objReturn.RecordsLoaded++;
+                }
+            }
+
+            // Return wrapper
+            return objReturn;
+        }
+        catch (Exception ex) {
+            // Log the error
+            system.debug('loadAccessRecords Error ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', null, 'ACT_ManageUsersController.loadAccessRecords', ex.getMessage(), '', '', '');
+
+            // Throw the error
+            AuraHandledException AHE = new AuraHandledException(ex.getMessage() + ', trace = ' + ex.getStackTraceString());
+            throw AHE;
+        }
+    }
+
+    @AuraEnabled
+    public static ACRRecordsWrapper loadACRRecords(string AccountId) {
+        try {
+            // Create the wrapper
+            ACRRecordsWrapper objReturn = new ACRRecordsWrapper();
+
+            // Get the ACRs
+            id idUser = UserInfo.getUserId();
+
+            String strQry = 'SELECT ContactId, Ed_Fi_Role__c, eMetrics_Role__c, IsActive, Status__c, Success_Community_Role__c, Contact.Email, Contact.Name, Contact.Phone, Contact.Title, Contact.User__r.Id ';
+            strQry += 'FROM AccountContactRelation ';
+            strQry += 'WHERE AccountId =: AccountId ';
+            strQry += 'AND Contact.User__r.Id !=: idUser AND Contact.Email != NULL ';
+            strQry += 'ORDER BY Contact.Name Asc ';
+
+
+            List<AccountContactRelation> lstACR = Database.query(strQry);
+
+            system.debug('ACR records = ' + lstACR.size());
+
+            // Loop through and create the AccessValue records
+            if (lstACR != null) {
+                for (AccountContactRelation thisACR : lstACR) {
+                    ACRValue newACR = new ACRValue();
+
+                    newACR.ContactId = thisACR.ContactId;
+                    newACR.ContactLink = ACT_CommunityBaseController.CommunityBaseURL() + '/' + thisACR.ContactId;
+                    newACR.ContactName = thisACR.Contact.Name;
+                    newACR.EmailAddress = thisACR.Contact.Email;
+                    newACR.Phone = thisACR.Contact.Phone;
+                    newACR.Title = thisACR.Contact.Title;
+
+                    objReturn.ACRRecords.add(newACR);
+                }
+            }
+
+            // Set the starting sort
+            objReturn.SortDirection = 'ASC';
+            objReturn.SortField = 'ContactName';
+
+            // Get the org type for the selected account
+            Set<String> setOrgTypes = new Set<String>{'B', 'D', null, ''};
+
+            List<Account> lstA =
+            [
+                    SELECT
+                            Id
+                    FROM
+                            Account
+                    WHERE
+                    Id =: AccountId
+                    And eMetric_Org_Type__c In : setOrgTypes
+            ];
+
+            // Check if partner apps should be selectable
+            ACT_Success_Toggles__c toggleSettings = ACT_Success_Toggles__c.getOrgDefaults();
+
+            objReturn.EnableEdFi = (toggleSettings != null && toggleSettings.Enable_Ed_Fi__c && lstA != null && lstA.size() == 1);
+            objReturn.EnableTAA = (toggleSettings != null && toggleSettings.Enable_TAA__c == true && lstA != null && lstA.size() == 1);
+
+            // Return wrapper
+            return objReturn;
+        }
+        catch (Exception ex) {
+            // Log the error
+            system.debug('loadACRRecords Error ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', null, 'ACT_ManageUsersController.loadACRRecords', ex.getMessage(), '', '', '');
+
+            // Throw the error
+            AuraHandledException AHE = new AuraHandledException(ex.getMessage() + ', trace = ' + ex.getStackTraceString());
+            throw AHE;
+        }
+    }
+
+    @AuraEnabled
+    public static ACRRecordsWrapper loadACRRecordsOnRevokeAction(string AccountId) {
+        try {
+            // Create the wrapper
+            ACRRecordsWrapper objReturn = new ACRRecordsWrapper();
+            Id thisUser = Userinfo.getUserId();
+            String strQry = 'SELECT Id,ContactId, TAA_Role__c,Ed_Fi_Role__c, eMetrics_Role__c, IsActive, Status__c, Success_Community_Role__c, Contact.Email, Contact.Name, Contact.Phone, Contact.Title, Contact.User__r.Id ';
+            strQry += 'FROM AccountContactRelation ';
+            strQry += 'WHERE AccountId =: AccountId AND IsActive = true AND Contact.User__c != :thisUser ';
+            strQry += 'ORDER BY Contact.Name Asc ';
+
+            List<AccountContactRelation> lstACR = Database.query(strQry);
+
+            system.debug('ACR records = ' + lstACR.size());
+
+            // Loop through and create the AccessValue records
+            if (lstACR != null) {
+                for (AccountContactRelation thisACR : lstACR) {
+                    ACRValue newACR = new ACRValue();
+
+                    newACR.ContactId = thisACR.ContactId;
+                    newACR.strACRId = thisACR.Id;
+                    newACR.ContactLink = ACT_CommunityBaseController.CommunityBaseURL() + '/' + thisACR.ContactId;
+                    newACR.ContactName = thisACR.Contact.Name;
+                    newACR.EmailAddress = thisACR.Contact.Email;
+                    newACR.Phone = thisACR.Contact.Phone;
+                    newACR.Title = thisACR.Contact.Title;
+                    newACR.strRoles = '';
+                    List<String> existingRoles = new List<String>();
+
+                    // Check for a trusted agent
+                    if (thisACR.Success_Community_Role__c == 'Trusted Agent') {
+                        existingRoles.add('Trusted Agent');
+                    }
+
+                    // Check for Ed-Fi, having any value allows the SAO_Ed_Fi_Admin permission set
+                    if (thisACR.Ed_Fi_Role__c != null) {
+                        existingRoles.add('Ed-Fi Role : '+thisACR.Ed_Fi_Role__c);
+                    }
+
+                    // Check for TAA role.
+                    if (thisACR.TAA_Role__c != null) {
+                        existingRoles.add('TAA Role : '+thisACR.TAA_Role__c);
+                    }
+
+                    // Check for On-Line reporting roles
+                    if (thisACR.Success_Community_Role__c == 'Standard' && thisACR.eMetrics_Role__c == 'Normal-Limited') {
+                        existingRoles.add('Online Reporting - Summary Viewer');
+                    }
+
+                    if (thisACR.Success_Community_Role__c == 'Standard' && thisACR.eMetrics_Role__c == 'Normal-Full') {
+                        existingRoles.add('Online Reporting - Detail Viewer');
+                    }
+
+                    //Check for State roles
+                    if (thisACR.Success_Community_Role__c == 'State User' && thisACR.eMetrics_Role__c == 'Normal-Limited') {
+                        existingRoles.add('State Summary Viewer');
+                    }
+
+                    if (thisACR.Success_Community_Role__c == 'State User' && thisACR.eMetrics_Role__c == 'Normal-Full') {
+                        existingRoles.add('State Detail Viewer');
+                    }
+
+                    if (thisACR.Success_Community_Role__c == 'State Trusted Agent') {
+                        existingRoles.add('State Trusted Agent');
+                    }
+
+                    newACR.strRoles = String.join(existingRoles, ',\n');
+
+                    if(String.isNotBlank(newACR.strRoles)){
+                        objReturn.ACRRecords.add(newACR);
+                    }
+                }
+            }
+
+            // Set the starting sort
+            objReturn.SortDirection = 'ASC';
+            objReturn.SortField = 'ContactName';
+
+            // Return wrapper
+            return objReturn;
+        }
+        catch (Exception ex) {
+            // Log the error
+            system.debug('loadACRRecords Error ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', null, 'ACT_ManageUsersControllerbackup.loadACRRecords', ex.getMessage(), '', '', '');
+
+            // Throw the error
+            AuraHandledException AHE = new AuraHandledException(ex.getMessage() + ', trace = ' + ex.getStackTraceString());
+            throw AHE;
+        }
+    }
+
+    @AuraEnabled
+    public static boolean processAccessRecords(String RecordIds, String Action, String onlineReportingAccess) {
+        // Initialize Variables
+        map<Id, Boolean> mapGetChildren = new map<Id, Boolean>();
+        set<Id> setGetChildren = new set<Id>();
+
+        // Log the call
+        system.debug(Action + ' for records ' + string.valueOf(RecordIds));
+
+        try {
+            // Get the RecordIds
+            list<Id> lstAccessRecords = RecordIds.split(',');
+
+            // Get the accounts the user is a Trusted Agent for
+            map<id, string> mapTA = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToRoleMapForUser(UserInfo.getUserId(), true, 'Trusted Agent');
+            map<id, string> mapSTA = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToRoleMapForUser(UserInfo.getUserId(), true, 'State Trusted Agent');
+            set<id> setTAAccounts = new set<id>();
+
+            setTAAccounts.addAll(mapTA.keySet());
+            setTAAccounts.addAll(mapSTA.keySet());
+            // Get the records
+            list<Access__c> lstAccess =
+            [
+                    SELECT
+                            Id,
+                            Account__c,
+                            Account__r.Active__c,
+                            Account__r.eMetric_Org_Type__c,
+                            Account__r.ParentId,
+                            Account__r.Parent.eMetric_Org_Type__c,
+                            Community_Contact__c,
+                            Community_Contact__r.Email,
+                            Ed_Fi_Role__c,
+                            Email_Address__c,
+                            Evaluated_By__c,
+                            eMetrics_Role__c,
+                            Status__c,
+                            TAA_Role__c,
+                            Type__c
+                    FROM
+                            Access__c
+                    WHERE
+                            Id in: lstAccessRecords
+            ];
+
+            // Verify the user has trusted agent access to the accounts being modified
+            for (Access__c checkA : lstAccess) {
+                if (!setTAAccounts.contains(checkA.Account__c)) {
+                    throw new CC_SC_GEN_Exception('You do not have Trusted Agent access to the accounts being modified.');
+                }
+            }
+
+            // Get the current user
+            User thisUser =
+            [
+                    SELECT
+                            ContactId,
+                            Name
+                    FROM
+                            User
+                    WHERE
+                            Id =: UserInfo.getUserId()
+            ];
+
+            // Create a holder for any emails
+            list<Messaging.SingleEmailMessage> lstEmail = new list<Messaging.SingleEmailMessage>();
+
+            // Process the records, based on the action
+            switch on Action {
+                when 'Approve' {
+                    // Get the template id for the email
+                    EmailTemplate template = [SELECT Id FROM EmailTemplate WHERE DeveloperName = 'Email_when_Access_is_Approved'];
+
+                    // Loop through once to adjust the access records, determine which records should have children ACRs created, and prepare for emails to go out
+                    for (Access__c thisA : lstAccess) {
+                        // Edit the access record to show it was approved
+                        String EvalByName = thisUser.Name;
+                        thisA.Evaluated_By__c = thisUser.ContactId;
+                        thisA.Status__c = 'Approved';
+
+                        // Determine which access records should have children ACRs created
+                        boolean blnIncludeChildren = ACT_GEN_HierarchyFunctionsWithoutSharing.getPropagateACRToChildren(thisA, thisA.Account__r);
+
+                        mapGetChildren.put(thisA.Id, blnIncludeChildren);
+
+                        if (blnIncludeChildren) {
+                            setGetChildren.add(thisA.Account__c);
+                        }
+
+                        // Create an email reminder
+                        String strEmail = thisA.Email_Address__c == null ? thisA.Community_Contact__r.Email : thisA.Email_Address__c;
+
+                        if (strEmail != null && thisUser.ContactId != null) {
+                            Messaging.SingleEmailMessage thisTemplateEmail = new Messaging.SingleEmailMessage();
+
+                            // Don't try to render the email in a test
+                            if (Test.isRunningTest()) {
+                                thisTemplateEmail.htmlBody = 'Testing';
+                                thisTemplateEmail.plainTextBody = 'Testing';
+                            }
+                            else {
+                                thisTemplateEmail = Messaging.renderStoredEmailTemplate(template.Id, thisUser.ContactId, thisA.Id);
+                            }
+
+                            Messaging.SingleEmailMessage thisEmail = new Messaging.SingleEmailMessage();
+                            thisEmail.setSaveAsActivity(false);
+
+                            thisEmail.setToAddresses(new list<String>{strEmail});
+                            thisEmail.setWhatId(thisA.Id);
+                            thisEmail.setTargetObjectId(thisUser.ContactId);
+                            thisEmail.setSubject(thisTemplateEmail.getSubject());
+
+                            string fullLink = ACT_CommunityBaseController.CommunityBaseURL();
+
+                            thisEmail.setPlainTextBody(thisTemplateEmail.getPlainTextBody().replace('{{$$$Text_to_replace}}', fullLink));
+                            thisEmail.setPlainTextBody(thisTemplateEmail.getPlainTextBody().replace('{{$$$Evaluated_By}}', EvalByName));
+
+                            thisEmail.setHTMLBody(thisTemplateEmail.getHTMLBody().replace('{{$$$Evaluated_By}}', EvalByName));
+                            thisEmail.setHTMLBody(thisEmail.getHTMLBody().replace('{{$$$Text_to_replace}}', fullLink));
+
+                            lstEmail.add(thisEmail);
+                        }
+                    }
+
+                    // Get children for applicable accounts
+                    map<id, list<Account>> mapChildren = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToChildrenMap(setGetChildren, false, true);
+
+                    // Loop through the access records again, to create ACRs
+                    list<ACT_GEN_HierarchyFunctions.ACRMVP> lstACRMVP = new list<ACT_GEN_HierarchyFunctions.ACRMVP>();
+
+                    for (Access__c thisA : lstAccess) {
+                        // Get the applicable accounts
+                        Map<Id,Boolean> mapAccounts = new Map<Id,Boolean>();
+
+                        // Always add the account in the access record
+                        mapAccounts.put(thisA.Account__c,thisA.Account__r.Active__c);
+
+                        // If applicable, add the children accounts too
+                        if (mapGetChildren.get(thisA.Id)) {
+                            for (Account thisAccount : mapChildren.get(thisA.Account__c)) {
+                                mapAccounts.put(thisAccount.id,thisAccount.Active__c);
+                            }
+                        }
+
+                        // Loop through and create the new ACRs
+                        for (Id thisAccountId : mapAccounts.keyset()) {
+                            ACT_GEN_HierarchyFunctions.ACRMVP newACRMVP = new ACT_GEN_HierarchyFunctions.ACRMVP();
+
+                            newACRMVP.AccountId = thisAccountId;
+                            newACRMVP.Active = mapAccounts.get(thisAccountId);
+                            newACRMVP.AuditChangeType = 'Access';
+                            newACRMVP.AuditContactId = thisUser.ContactId;
+                            newACRMVP.AuditChangeTypeId = thisA.Id;
+                            newACRMVP.AuditReason = 'Manage User Access Approved';
+                            newACRMVP.ContactId = thisA.Community_Contact__c;
+                            newACRMVP.Contract = '99_2018_2019';
+                            newACRMVP.EdFiRole = thisA.Ed_Fi_Role__c;
+                            newACRMVP.eMetricsRole = thisA.eMetrics_Role__c;
+                            newACRMVP.Status = mapAccounts.get(thisAccountId) ? 'Active' : 'Inactive';
+                            newACRMVP.TAARole = ACT_GEN_HierarchyFunctions.getTAARole(thisA.TAA_Role__c);
+
+                            // Determine Success Community Role based on the eMetric Org Type
+                            if (thisA.Account__r.eMetric_Org_Type__c == 'S') {
+                                if (thisA.eMetrics_Role__c == 'Admin-Full') {
+                                    newACRMVP.SuccessCommunityRole = 'State Trusted Agent';
+                                }
+                                else {
+                                    newACRMVP.SuccessCommunityRole = 'State User';
+                                }
+                            }
+                            else {
+                                if (thisA.eMetrics_Role__c == 'Admin-Full') {
+                                    newACRMVP.SuccessCommunityRole = 'Trusted Agent';
+                                }
+                                else {
+                                    newACRMVP.SuccessCommunityRole = 'Standard';
+                                }
+                            }
+
+                            if(onlineReportingAccess !='' && onlineReportingAccess=='View Contract Deliverables'){
+                                newACRMVP.PANextRole = 'View Contract Deliverables';
+                            }
+
+                            // Only do upgrades
+                            newACRMVP.UpgradeRolesOnly = true;
+
+                            lstACRMVP.add(newACRMVP);
+                        }
+                    }
+
+                    // Update the access records
+                    update lstAccess;
+
+                    // Create the ACRs
+                    if (lstACRMVP.size() > 0) {
+                        ACT_GEN_HierarchyFunctionsWithoutSharing.setACRAccess(lstACRMVP);
+                    }
+                }
+
+                when 'Cancel' {
+                    // Loop through once to adjust the access records
+                    for (Access__c thisA : lstAccess) {
+                        // Edit the access record to show it was rejected
+                        thisA.Evaluated_By__c = thisUser.ContactId;
+                        thisA.Status__c = 'Cancelled';
+                    }
+
+                    // Update the access records
+                    update lstAccess;
+                }
+
+                when 'Extend' {
+                    List<Messaging.SingleEmailMessage> lstUnprocessed = new List<Messaging.SingleEmailMessage>();
+                    // Get the template id for the email
+                    EmailTemplate template = [SELECT Id FROM EmailTemplate WHERE DeveloperName = 'Online_Reporting_has_been_extended'];
+                    // Start by mapping the access records
+                    Map<String, Access__c> mapEmailToAccess = new Map<String, Access__c>();
+                    Map<String, String> mapEmailToFirstName = new Map<String, String>();
+                    for (Access__c thisA : lstAccess) {
+                        mapEmailToAccess.put(thisA.Email_Address__c, thisA);
+                    }
+                    List<Contact> lstContact = [Select Id, FirstName, Email from Contact where Email IN :mapEmailToAccess.keySet()];
+                    if (!lstContact.isEmpty()) {
+                        mapEmailToFirstName.put(lstContact[0].Email, lstContact[0].FirstName);
+                    }
+
+                    // Loop through to adjust the access records, and prepare for emails to go out
+                    for (Access__c thisA : lstAccess) {
+                        // Extend the expiration date to 60 days from today is updated to 31 days
+                        thisA.Expiration_Date__c = Date.today().addDays(31);
+
+                        // Create an email reminder
+                        if (thisA.Email_Address__c != null && thisUser.ContactId != null) {
+                            Messaging.SingleEmailMessage thisEmail = new Messaging.SingleEmailMessage();
+
+                            thisEmail.setSaveAsActivity(false);
+                            thisEmail.setTemplateId(template.Id);
+                            thisEmail.setToAddresses(new list<String>{
+                                    thisA.Email_Address__c
+                            });
+                            thisEmail.setWhatId(thisA.Id);
+
+                            if (thisA.Community_Contact__c != null) {
+                                thisEmail.setTargetObjectId(thisA.Community_Contact__c);
+                            } else {
+                                thisEmail.setTargetObjectId(thisUser.ContactId);
+                            }
+
+                            lstUnprocessed.add(thisEmail);
+                        }
+                    }
+                    // Update the access records
+                    update lstAccess;
+                    // Set a save point to have the email get rendered, and then rolled back
+                    Savepoint sp = Database.setSavepoint();
+                    Messaging.sendEmail(lstUnprocessed);
+                    Database.rollback(sp);
+                    // Now re-process the mail, fixing the user link
+                    for (Messaging.SingleEmailMessage thisOldE : lstUnprocessed) {
+                        Messaging.SingleEmailMessage thisNewE = new Messaging.SingleEmailMessage();
+                        string strLink = ACT_CommunityBaseController.CommunityBaseURL() + '/s/login/SelfRegister?accessid=' + mapEmailToAccess.get(thisOldE.getToAddresses()[0]).Id;
+                        String strDate = mapEmailToAccess.get(thisOldE.getToAddresses()[0]).Expiration_Date__c.format('MMM dd,yyyy');
+                        if (mapEmailToFirstName.keySet().contains(thisOldE.getToAddresses()[0])) {
+                            thisNewE.setPlainTextBody(thisOldE.getPlainTextBody().replace('{{$$$FirstName_to_replace}}', mapEmailToFirstName.get(thisOldE.getToAddresses()[0])).replace('{{$$$Date_to_replace}}', strDate).replace('{{$$$Text_to_replace}}', strLink));
+                            thisNewE.setHTMLBody(thisOldE.getHTMLBody().replace('{{$$$FirstName_to_replace}}', mapEmailToFirstName.get(thisOldE.getToAddresses()[0])).replace('{{$$$Date_to_replace}}', strDate).replace('{{$$$Text_to_replace}}', strLink));
+                        } else {
+                            thisNewE.setPlainTextBody(thisOldE.getPlainTextBody().replace('{{$$$FirstName_to_replace}}', 'Valued Customer').replace('{{$$$Date_to_replace}}', strDate).replace('{{$$$Text_to_replace}}', strLink));
+                            thisNewE.setHTMLBody(thisOldE.getHTMLBody().replace('{{$$$FirstName_to_replace}}', 'Valued Customer').replace('{{$$$Date_to_replace}}', strDate).replace('{{$$$Text_to_replace}}', strLink));
+                        }
+                        thisNewE.setSubject(thisOldE.getSubject());
+                        thisNewE.setToAddresses(thisOldE.getToAddresses());
+                        lstEmail.add(thisNewE);
+
+                    }
+                }
+
+                when 'Reject' {
+                    // Get the template id for the email
+                    EmailTemplate template = [SELECT Id FROM EmailTemplate WHERE DeveloperName = 'Email_when_Access_is_Rejected'];
+
+                    // Loop through to adjust the access records, and prepare for emails to go out
+                    for (Access__c thisA : lstAccess) {
+                        // Edit the access record to show it was rejected
+                        thisA.Evaluated_By__c = thisUser.ContactId;
+                        String EvalByName = thisUser.Name;
+                        thisA.Status__c = 'Rejected';
+
+                        // Create an email reminder
+                        String strEmail = thisA.Email_Address__c == null ? thisA.Community_Contact__r.Email : thisA.Email_Address__c;
+
+                        if (strEmail != null && thisUser.ContactId != null) {
+                            Messaging.SingleEmailMessage thisTemplateEmail = new Messaging.SingleEmailMessage();
+
+                            // Don't try to render the email in a test
+                            if (Test.isRunningTest()) {
+                                thisTemplateEmail.htmlBody = 'Testing';
+                                thisTemplateEmail.plainTextBody = 'Testing';
+                            }
+                            else {
+                                thisTemplateEmail = Messaging.renderStoredEmailTemplate(template.Id, thisUser.ContactId, thisA.Id);
+                            }
+
+                            Messaging.SingleEmailMessage thisEmail = new Messaging.SingleEmailMessage();
+
+                            thisEmail.setSaveAsActivity(false);
+                            thisEmail.setToAddresses(new list<String>{strEmail});
+                            thisEmail.setWhatId(thisA.Id);
+                            thisEmail.setTargetObjectId(thisUser.ContactId);
+                            thisEmail.setSubject(thisTemplateEmail.getSubject());
+                            string fullLink = ACT_CommunityBaseController.CommunityBaseURL() + '/s/?startURL=%2Fs%2Frequest-access';
+
+                            thisEmail.setPlainTextBody(thisTemplateEmail.getPlainTextBody().replace('{{$$$Text_to_replace}}', fullLink));
+                            thisEmail.setPlainTextBody(thisTemplateEmail.getPlainTextBody().replace('{{$$$Evaluated_By}}', EvalByName));
+
+                            thisEmail.setHTMLBody(thisTemplateEmail.getHTMLBody().replace('{{$$$Text_to_replace}}', fullLink));
+                            thisEmail.setHTMLBody(thisEmail.getHTMLBody().replace('{{$$$Evaluated_By}}', EvalByName));
+
+                            lstEmail.add(thisEmail);
+                        }
+                    }
+
+                    // Update the access records
+                    update lstAccess;
+                }
+            }
+
+            // Send any emails, using Percy
+            if (lstEmail.size() > 0) {
+                ACT_GEN_EmailFunctions objPercy = new ACT_GEN_EmailFunctions();
+
+                objPercy.callingFunction = 'ACT_ManageUsersController.processAccessRecords';
+                objPercy.emailToProcess = ACT_GEN_EmailFunctionsIterator.convertMessages(lstEmail);
+
+                Database.executeBatch(objPercy, 10);
+            }
+
+            return true;
+        }
+        catch (Exception ex) {
+            // Log the error
+            system.debug('processAccessRecords Error ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', null, 'ACT_ManageUsersController.processAccessRecords', ex.getMessage(), '', '', '');
+
+            // Throw the error
+            AuraHandledException AHE = new AuraHandledException(ex.getMessage());
+            throw AHE;
+        }
+    }
+
+    @AuraEnabled
+    public static Boolean processAddAccess(String addAccessRequest) {
+        try {
+            // Deserialize the parameter object from the lightning component
+            AddAccessRequest objRequest = (AddAccessRequest)JSON.deserialize(addAccessRequest, AddAccessRequest.class);
+
+            // Get the accounts the user is a Trusted Agent for
+            map<id, string> mapTA = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToRoleMapForUser(UserInfo.getUserId(), true, 'Trusted Agent');
+
+            // Get the accounts the user is a State Trusted Agent for
+            map<id, string> mapSTA = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToRoleMapForUser(UserInfo.getUserId(), true, 'State Trusted Agent');
+
+            // Get the eMetric org type for the account
+            String strEMOT = [SELECT eMetric_Org_Type__c FROM Account WHERE Id=: objRequest.AccountId].eMetric_Org_Type__c;
+
+            // Make sure the current user can modify this non-state account
+            if (strEMOT != 'S' && (mapTA.isEmpty() || !mapTA.keySet().contains(objRequest.AccountId))) {
+                throw new CC_SC_GEN_Exception('You do not have Trusted Agent access to the account being modified.');
+            }
+
+            // Make sure the current user can modify this state account
+            if (strEMOT == 'S' && (mapSTA.isEmpty() || !mapSTA.keySet().contains(objRequest.AccountId))) {
+                throw new CC_SC_GEN_Exception('You do not have State Trusted Agent access to the account being modified.');
+            }
+
+            // Put the existing contacts in a set
+            List<Id> lstExistingContacts = new List<Id>();
+            List<Id> selectedUsersContactId;
+            if(objRequest.SelectedUsers!=null){
+                selectedUsersContactId = objRequest.SelectedUsers.split(',');
+            }
+            Map<Id,Id> mapContactIdToUserId = new Map<Id,Id>();
+            List<Id> notRegisterdContacts = new List<Id>();
+            List<String> lstNewUsers = new List<String>();
+
+            if (!String.isEmpty(objRequest.SelectedUsers)) {
+                //take list of registered users from SAO as existing users based on profile assigned
+                List<User> PortalUsers = [SELECT Id,Name,ContactId,Email FROM User WHERE Profile.Name = 'Community User' AND ContactId IN:selectedUsersContactId];
+                if(PortalUsers.isEmpty()){
+                    notRegisterdContacts.addAll(selectedUsersContactId);
+                }
+                else{
+                    for(Id suc : selectedUsersContactId){
+                        for(User pu : PortalUsers){
+                            if(pu.ContactId!=suc){
+                                notRegisterdContacts.add(suc);
+                            }
+                            else{
+                                mapContactIdToUserId.put(pu.ContactId,pu.Id);
+                            }
+                            //lstExistingContacts.add(pu.ContactId);
+                        }
+                        if(!mapContactIdToUserId.isEmpty()){
+                            lstExistingContacts.addAll(mapContactIdToUserId.keySet());
+                        }
+                    }
+                }
+                if(!notRegisterdContacts.isEmpty()){
+                    //seperate list of existing users but not registered with SAO
+                    List<Contact> notRegisteredContacts = [select id,email from contact where id IN:notRegisterdContacts];
+                    for(contact con : notRegisteredContacts){
+                        lstNewUsers.add(con.Email);
+                    }
+                }
+
+                //lstExistingContacts.addAll(objRequest.SelectedUsers.split(','));
+            }
+
+            // Get the account
+            Account thisAccount =
+            [
+                    SELECT
+                            Id,
+                            eMetric_Org_Type__c
+                    FROM
+                            Account
+                    WHERE
+                            Id =: objRequest.AccountId
+            ];
+
+            // Get the current user's contact email address
+            Contact thisContact =
+            [
+                    SELECT
+                            Id,
+                            Email
+                    FROM
+                            Contact
+                    WHERE
+                            User__c =: UserInfo.getUserId()
+            ];
+
+            // If there are contact emails, find which ones are existing contact users
+            List<String> lstUserEmails = new List<String>();
+            Map<String, Contact> mapExistingContacts = new Map<String, Contact>();
+
+            // Examine the new emails
+            if (!String.isEmpty(objRequest.UserEmails)) {
+                lstUserEmails.addAll(objRequest.UserEmails.split(','));
+
+                // Trim the email addresses
+                for (integer intX = 0; intX < lstUserEmails.size(); intX++) {
+                    lstUserEmails[intX] = lstUserEmails[intX].trim();
+                }
+
+                // Look for existing contacts that match the "new" emails
+                List<Contact> lstExistingEmails = [
+                        SELECT
+                                Id,
+                                Email
+                        FROM
+                                Contact
+                        WHERE
+                        Email In: lstUserEmails
+                        And User__c != null
+                ];
+
+                // Map and check the emails
+                for (Contact thisC : lstExistingEmails) {
+                    mapExistingContacts.put(thisC.Email, thisC);
+
+                    // Check if the user is trying to grant access to themselves
+                    if (thisC.Email == thisContact.Email) {
+                        throw new CC_SC_GEN_Exception('You cannot grant additional access to yourself.');
+                    }
+                }
+
+                // See if each email is new or existing
+                for (String thisEmail : lstUserEmails) {
+                    Contact thisC = mapExistingContacts.get(thisEmail);
+
+                    if (thisC == null) {
+                        lstNewUsers.add(thisEmail.trim());
+                    }
+                    else {
+                        lstExistingContacts.add(thisC.Id);
+                    }
+                }
+            }
+
+            // Get the grant record type
+            Id devAccessGrantRT = Schema.SObjectType.Access__c.getRecordTypeInfosByName().get('Grant Record Type').getRecordTypeId();
+
+            // Create a holder for all access records
+            List<Access__c> lstNewAccess = new List<Access__c>();
+
+            // Determine the individual roles
+            // Only add the PANext level if it is not "scores only"
+            String strEdFiRole = objRequest.EdFiAccess == 'true' ? 'Ed-Fi Tenant Admin' : null;
+            String strPANextRole = objRequest.OLRAccessLevel == 'View Contract Deliverables' ? 'View Contract Deliverables' : null;
+            String strTAARole = ACT_GEN_HierarchyFunctions.getTAARole(objRequest.TAALevel);
+
+            // Determine the combined roles string
+            String strRequestedRoles = ACT_CommunityBaseController.CommaDelimited(new String[]{ACT_GEN_HierarchyFunctions.getRequestedRole(objRequest.AccessLevel), strEdFiRole, ACT_GEN_HierarchyFunctions.getTAAFriendlyName(strTAARole), strPANextRole});
+
+            // Create the access records for new users
+            for (string thisNewUser : lstNewUsers) {
+                // Create the access record
+                Access__c newA = new Access__c();
+
+                newA.Account__c = objRequest.AccountId;
+                newA.Email_Address__c = thisNewUser;
+                newA.Ed_Fi_Role__c = strEdFiRole != null ? 'EDFI_TENANT_ADMIN' : null;
+                newA.eMetrics_Role__c = ACT_GEN_HierarchyFunctions.geteMetricsRole(objRequest.AccessLevel);
+                newA.Expiration_Date__c = system.now().addDays(31);
+                newA.Grantor__c = thisContact.Id;
+                newA.PANext_Role__c = strPANextRole;
+                newA.RecordTypeId = devAccessGrantRT;
+                newA.Requested_Roles__c = strRequestedRoles;
+                newA.Status__c = 'Open';
+                newA.TAA_Role__c = strTAARole;
+                newA.Type__c = 'Grant';
+
+                lstNewAccess.add(newA);
+            }
+
+            // Prepare for ACRs
+            Set<Id> setACRs = new Set<Id>();
+
+            // Get the email addresses for the existing contacts
+            List<Contact> lstContactEmails =
+            [
+                    SELECT
+                            Id,
+                            Email
+                    FROM
+                            Contact
+                    WHERE
+                            Id in: lstExistingContacts
+            ];
+
+            map<Id, String> mapContactEmails = new map<Id, String>();
+
+            for (Contact thisC : lstContactEmails) {
+                mapContactEmails.put(thisC.Id, thisC.Email);
+            }
+
+            // Create the access records for existing users
+            for (Id thisExistingUser: lstExistingContacts) {
+                // Create the access record
+                Access__c newA = new Access__c();
+
+                newA.Account__c = objRequest.AccountId;
+                newA.Community_Contact__c = thisExistingUser;
+                newA.Ed_Fi_Role__c = strEdFiRole != null ? 'EDFI_TENANT_ADMIN' : null;
+                newA.Email_Address__c = mapContactEmails.get(thisExistingUser);
+                newA.eMetrics_Role__c = ACT_GEN_HierarchyFunctions.geteMetricsRole(objRequest.AccessLevel);
+                newA.Grantor__c = thisContact.Id;
+                newA.PANext_Role__c = strPANextRole;
+                newA.RecordTypeId = devAccessGrantRT;
+                newA.Requested_Roles__c = strRequestedRoles;
+                newA.Status__c = 'Accepted';
+                newA.TAA_Role__c = strTAARole;
+                newA.Type__c = 'Grant';
+
+                lstNewAccess.add(newA);
+
+                // Add the user to the ACR set
+                setACRs.add(thisExistingUser);
+            }
+
+            // Insert the new access records
+            insert lstNewAccess;
+
+            // Create the ACRs, if necessary
+            if (lstExistingContacts.size() > 0) {
+                ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccountWithPANext((Id)objRequest.AccountId, setACRs, ACT_GEN_HierarchyFunctions.getSuccessCommunityRole(thisAccount, objRequest.AccessLevel), ACT_GEN_HierarchyFunctions.geteMetricsRole(objRequest.AccessLevel), ACT_GEN_HierarchyFunctions.getEdFiRole(objRequest.EdFiAccess, true), strTAARole, thisContact.Id, 'Access', lstNewAccess, null, 'Manage User Access Granted', strPANextRole);
+            }
+
+            // Process the emails
+            // Start by mapping the access records
+            Map<String, Access__c> mapEmailToAccess = new Map<String, Access__c>();
+
+            for (Access__c thisA : lstNewAccess) {
+                mapEmailToAccess.put(thisA.Email_Address__c, thisA);
+            }
+
+            // Get the email templates
+            EmailTemplate tmpWelcome = [Select id, HtmlValue,Body from EmailTemplate where developername = 'Welcome_Email_Grant_Access'];
+            EmailTemplate tmpExisting = [Select id, HtmlValue,Body from EmailTemplate where developername = 'New_Online_Reporting_Access_Granted'];
+
+            // Create the emails
+            List<Messaging.SingleEmailMessage> lstEmails = new List<Messaging.SingleEmailMessage>();
+
+            for (Access__c thisA : lstNewAccess) {
+                if (thisA.Email_Address__c != null) {
+                    Messaging.SingleEmailMessage thisE = new Messaging.SingleEmailMessage();
+
+                    thisE.setSaveAsActivity(false);
+                    thisE.setTargetObjectId(thisContact.Id);
+                    thisE.setToAddresses(new List<String>{thisA.Email_Address__c});
+                    thisE.setTreatTargetObjectAsRecipient(false);
+                    thisE.setWhatId(thisA.Id);
+
+                    if (thisA.status__c == 'Accepted') {
+                        thisE.setTemplateID(tmpExisting.Id);
+                    }
+                    else {
+                        thisE.setTemplateID(tmpWelcome.Id);
+                    }
+
+                    lstEmails.add(thisE);
+                }
+            }
+
+            // Set a save point to have the email get rendered, and then rolled back
+            Savepoint sp = Database.setSavepoint();
+            Messaging.sendEmail(lstEmails);
+            Database.rollback(sp);
+
+            // Now re-process the mail, fixing the user link
+            List<Messaging.SingleEmailMessage> lstResend = new List<Messaging.SingleEmailMessage>();
+
+            for (Messaging.SingleEmailMessage thisOldE : lstEmails) {
+                Messaging.SingleEmailMessage thisNewE = new Messaging.SingleEmailMessage();
+
+                string strLink = ACT_CommunityBaseController.CommunityBaseURL() + '/s/login/SelfRegister?accessid=' + mapEmailToAccess.get(thisOldE.getToAddresses()[0]).Id;
+
+                thisNewE.setHTMLBody(thisOldE.getHTMLBody().replace('{{$$$Text_to_replace}}', strLink));
+                thisNewE.setPlainTextBody(thisOldE.getPlainTextBody().replace('{{$$$Text_to_replace}}', strLink));
+                thisNewE.setSubject(thisOldE.getSubject());
+                thisNewE.setToAddresses(thisOldE.getToAddresses());
+
+                lstResend.add(thisNewE);
+            }
+
+            // Do a final send of the email, using Percy
+            ACT_GEN_EmailFunctions objPercy = new ACT_GEN_EmailFunctions();
+
+            objPercy.callingFunction = 'ACT_IDP_AddUsersController.createAccess';
+            objPercy.emailToProcess = ACT_GEN_EmailFunctionsIterator.convertMessages(lstResend);
+
+            Database.executeBatch(objPercy, 10);
+
+            return true;
+        }
+        catch (Exception ex) {
+            // Log the error
+            system.debug('processAddAccess Error ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', null, 'processAddAccess.processAccessRecords', ex.getMessage(), '', '', '');
+
+            // Throw the error
+            AuraHandledException AHE = new AuraHandledException(ex.getMessage());
+            throw AHE;
+        }
+    }
+
+
+    @AuraEnabled
+    public static ACRRecordsWrapper processRevokeAccessRequest(string strACRIds,string accId, String selectedRevokeAccess) {
+        String  strAccountId = '';
+        try{
+            Set<Id> AccountId = new Set<Id>();
+            Set<iD> ContactId = new Set<Id>();
+            List<String> lstACRIds = (list<String>)JSON.deserialize(strACRIds, list<String>.class);
+            List<ACT_GEN_HierarchyFunctions.ACRMVP> lstACRMVP = new List<ACT_GEN_HierarchyFunctions.ACRMVP>();
+            List<AccountContactRelation> lstACR = [SELECT Id, AccountId, ContactId, Ed_Fi_Role__c,eMetrics_Role__c,Success_Community_Role__c,TAA_Role__c FROM AccountContactRelation WHERE Id IN :lstACRIds];
+            strAccountId = accId;
+            // Get the current user
+            User thisUser =[SELECT ContactId,Name FROM User WHERE Id =: UserInfo.getUserId()];
+            if(lstACR != null && !lstACR.isEmpty()){
+                for(AccountContactRelation objACR : lstACR){
+                    AccountId.add(objACR.AccountId);
+                    ContactId.add(objACR.ContactId);
+                    ACT_GEN_HierarchyFunctions.ACRMVP newACRMVP = new ACT_GEN_HierarchyFunctions.ACRMVP();
+                    newACRMVP.AccountId = objACR.AccountId;
+                    newACRMVP.Active = false;
+                    newACRMVP.AuditChangeType = 'Revoke Access';
+                    newACRMVP.AuditContactId = thisUser.ContactId;
+                    //newACRMVP.AuditChangeTypeId = thisA.Id;
+                    newACRMVP.AuditReason = 'Revoked Access For User';
+                    newACRMVP.ContactId = objACR.ContactId;
+                    newACRMVP.EdFiRole = objACR.Ed_Fi_Role__c;
+                    newACRMVP.eMetricsRole = objACR.eMetrics_Role__c;
+                    newACRMVP.Status = 'Inactive';
+                    newACRMVP.SuccessCommunityRole = objACR.Success_Community_Role__c;
+                    newACRMVP.TAARole = objACR.TAA_Role__c;
+                    newACRMVP.UpgradeRolesOnly = false;
+                    lstACRMVP.add(newACRMVP);
+                }
+                if(selectedRevokeAccess == 'Selected Organisation and organisations below in hierarchy'){
+                    if(AccountId != null && !AccountId.isEmpty() && ContactId != null && !ContactId.isEmpty()){
+                        List<Account> lstAccounts = [SELECT Id FROM Account WHERE ParentId IN: AccountId OR Parent.ParentId IN: AccountId];
+                        if(lstAccounts != null && !lstAccounts.isEmpty()){
+                            List<AccountContactRelation> lstChildACRs = [SELECT Id, AccountId, ContactId, Ed_Fi_Role__c,eMetrics_Role__c,Success_Community_Role__c,TAA_Role__c FROM AccountContactRelation WHERE AccountId IN: lstAccounts AND ContactId IN: ContactId];
+                            if(lstChildACRs != null && !lstChildACRs.isEmpty()){
+                                for(AccountContactRelation objACR : lstChildACRs){
+                                    ACT_GEN_HierarchyFunctions.ACRMVP newACRMVP = new ACT_GEN_HierarchyFunctions.ACRMVP();
+                                    newACRMVP.AccountId = objACR.AccountId;
+                                    newACRMVP.Active = false;
+                                    newACRMVP.AuditChangeType = 'Revoke Access';
+                                    newACRMVP.AuditContactId = thisUser.ContactId;
+                                    //newACRMVP.AuditChangeTypeId = thisA.Id;
+                                    newACRMVP.AuditReason = 'Revoked Access For User';
+                                    newACRMVP.ContactId = objACR.ContactId;
+                                    newACRMVP.EdFiRole = objACR.Ed_Fi_Role__c;
+                                    newACRMVP.eMetricsRole = objACR.eMetrics_Role__c;
+                                    newACRMVP.Status = 'Inactive';
+                                    newACRMVP.SuccessCommunityRole = objACR.Success_Community_Role__c;
+                                    newACRMVP.TAARole = objACR.TAA_Role__c;
+                                    newACRMVP.UpgradeRolesOnly = false;
+                                    lstACRMVP.add(newACRMVP);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (lstACRMVP != null && !lstACRMVP.isEmpty()) {
+                ACT_GEN_HierarchyFunctionsWithoutSharing.setACRAccess(lstACRMVP);
+            }
+
+            return loadACRRecordsOnRevokeAction(strAccountId);
+        }
+        catch(Exception ex){
+            // Log the error
+            system.debug('processRevokeAccessRequest Error ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', null, 'ACT_ManageUsersControllerbackup.processRevokeAccessRequest', ex.getMessage(), '', '', '');
+
+            // Throw the error
+            //AuraHandledException AHE = new AuraHandledException(ex.getMessage() + ', trace = ' + ex.getStackTraceString());
+            //throw AHE;
+            return loadACRRecordsOnRevokeAction(strAccountId);
+        }
+    }
+
+
+
+    //////////////////////////////
+    // Subclasses
+    //////////////////////////////
+    public class AccessRecordsWrapper {
+        @AuraEnabled
+        public list<AccessValue> AccessRecords {get; set;}
+        @AuraEnabled
+        public boolean AllRecordsLoaded {get; set;}
+        @AuraEnabled
+        public boolean HideCheckboxes {get; set;}
+        @AuraEnabled
+        public boolean LazyLoading {get; set;}
+        @AuraEnabled
+        public integer RecordsLoaded {get; set;}
+        @AuraEnabled
+        public string SortField {get; set;}
+        @AuraEnabled
+        public string SortDirection {get; set;}
+        @AuraEnabled
+        public string ViewInstructions {get; set;}
+
+        //////////////////////////////
+        // Constructor
+        //////////////////////////////
+        public AccessRecordsWrapper() {
+            AccessRecords = new list<AccessValue>();
+            RecordsLoaded = 0;
+        }
+    }
+
+    public class AccessValue {
+        @AuraEnabled
+        public string AccessId {get; set;}
+        @AuraEnabled
+        public string ContactName {get; set;}
+        @AuraEnabled
+        public string ContactLink {get; set;}
+        @AuraEnabled
+        public string EmailAddress {get; set;}
+        @AuraEnabled
+        public string EvaluatedBy {get; set;}
+        @AuraEnabled
+        public DateTime ExpirationDate {get; set;}
+        @AuraEnabled
+        public string Grantor {get; set;}
+        @AuraEnabled
+        public string Organization {get; set;}
+        @AuraEnabled
+        public string OrganizationLink {get; set;}
+        @AuraEnabled
+        public DateTime RequestDate {get; set;}
+        @AuraEnabled
+        public string RequestedRole {get; set;}
+        @AuraEnabled
+        public string Type {get; set;}
+    }
+
+    public class ACRRecordsWrapper {
+        @AuraEnabled
+        public list<ACRValue> ACRRecords {get; set;}
+        @AuraEnabled
+        public Boolean EnableEdFi {get; set;}
+        @AuraEnabled
+        public Boolean EnableTAA {get; set;}
+        @AuraEnabled
+        public string SortField {get; set;}
+        @AuraEnabled
+        public string SortDirection {get; set;}
+
+        //////////////////////////////
+        // Constructor
+        //////////////////////////////
+        public ACRRecordsWrapper() {
+            ACRRecords = new list<ACRValue>();
+        }
+    }
+
+    public class ACRValue {
+        @AuraEnabled
+        public string ContactId {get; set;}
+        @AuraEnabled
+        public string ContactName {get; set;}
+        @AuraEnabled
+        public string ContactLink {get; set;}
+        @AuraEnabled
+        public string EmailAddress {get; set;}
+        @AuraEnabled
+        public string Phone {get; set;}
+        @AuraEnabled
+        public string Title {get; set;}
+        @AuraEnabled
+        public string strRoles {get; set;}
+        @AuraEnabled
+        public string strACRId {get; set;}
+    }
+
+    public class AddAccessRequest {
+        @AuraEnabled
+        public String AccessLevel {get; set;}
+        @AuraEnabled
+        public String AccountId {get; set;}
+        @AuraEnabled
+        public String EdFiAccess {get; set;}
+        @AuraEnabled
+        public String SelectedUsers {get; set;}
+        @AuraEnabled
+        public String TAALevel {get; set;}
+        @AuraEnabled
+        public String UserEmails {get; set;}
+        @AuraEnabled
+        Public String OLRAccessLevel {get; set;}
+    }
+
+    public class PageInitialize {
+        @AuraEnabled
+        public Boolean EnableAddAccess {get; set;}
+        @AuraEnabled
+        public Boolean EnableStateAndDistrict {get; set;}
+        @AuraEnabled
+        public Boolean HasPermission {get; set;}
+        @AuraEnabled
+        public String KnowledgeURL {get; set;}
+    }
+}
