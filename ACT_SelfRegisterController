@@ -1,0 +1,596 @@
+/**
+* Copyright (c) 2018. 7Summits Inc.
+* Created by Mitul Patel, 7Summits on 09/05/18.
+*/
+
+
+
+public without sharing class ACT_SelfRegisterController {
+
+    public ACT_SelfRegisterController() {
+
+    }
+
+    @TestVisible
+    private static boolean isValidPassword(String password, String confirmPassword) {
+        return password == confirmPassword;
+    }
+
+    @TestVisible
+    private static boolean siteAsContainerEnabled(String communityUrl) {
+        Auth.AuthConfiguration authConfig = new Auth.AuthConfiguration(communityUrl,'');
+        return authConfig.isCommunityUsingSiteAsContainer();
+    }
+
+    @TestVisible
+    private static void validatePassword(User u, String password, String confirmPassword) {
+        if(!Test.isRunningTest()) {
+            Site.validatePassword(u, password, confirmPassword);
+        }
+        return;
+    }
+
+    @AuraEnabled
+    public static String siteBaseURLGet() {
+        return URL.getSalesforceBaseUrl().toExternalForm();
+    }
+
+    @AuraEnabled
+    public static String selfRegister(String firstname ,String lastname, String nickname, String email, String password, String confirmPassword, String accountId, String regConfirmUrl, String extraFields, String startUrl, Boolean includePassword, String phoneNumber, String birthday,
+            string accessToken, List<String> selectedRoles, string accessLevel,string accessCodeId,integer accessCodeUsage,string validateResponse , string selectedAccount ,string UrlAccessId ,string accessCode,
+            string timezone,string pin,string selectedEmployer) {
+        // Declare variables to handle ACRs
+        Id ACRAccountId;
+        set<id> ACRContactIds;
+        string ACRAccessId;
+        string ACRAuditReason;
+        string ACREdFiRole;
+        string ACReMetricsRole;
+        string ACRSuccessCommunityRole;
+        string ACRTAARole;
+        string ACRPANextRole;
+
+        // Set a savepoint to roll back to
+        Savepoint sp = null;
+
+        try {
+            sp = Database.setSavepoint();
+
+            if (lastname == null || String.isEmpty(lastname)) {
+                return Label.ACT_lastname_is_required;
+            }
+
+            if (email == null || String.isEmpty(email)) {
+                return Label.ACT_email_is_required;
+            }
+            //Check if email is already used for an user
+            if (userExists(email)) {
+                return Label.ACT_UserExists;
+            }
+
+            if (nickname == null || String.isEmpty(nickname)) {
+                return Label.ACT_nickname_is_required;
+            }
+
+            User u = new User();
+
+            u.Username = email;
+            u.put('Email',email);
+
+            u.FirstName = firstname;
+            u.LastName = lastname;
+            u.CommunityNickname = nickname;
+            Id contactId = findContactId(email);
+
+            //Update AccountId as account of the user
+            If(contactID!=null){
+                accountId = [select Accountid from Contact where id = :contactId][0].accountid;
+
+            }
+
+            if(accessLevel == 'Trusted Agent' && accessCodeUsage >0 && accessCodeId !=null && validateResponse == 'valid'){
+                system.debug('accessToken----------'+accessToken);
+                system.debug('accountId----------'+accountId);
+                system.debug('accessCodeId------'+accessCodeId);
+                system.debug('accessCode---------'+accessCode);
+                string validResponse = ACT_IDP_RequestAccessController.validateAcessCode(accessCode,selectedAccount);
+                system.debug('validResponse-----------'+validResponse);
+                if(validResponse.startsWith('Invalid'))
+                {
+                    throw new CC_SC_GEN_Exception('Invalid Access Code');
+                }
+                u.App_Access_Granted__c = true;
+
+            }
+            else if (UrlAccessId !=null && accessLevel != 'Trusted Agent')
+            {
+                u.App_Access_Granted__c = true;
+            }
+
+            u.ContactId = contactId;
+
+            //setting the timezone of the user.
+            if(timezone !=null)
+            {
+                u.TimeZoneSidKey = timezone;
+            }
+
+            String networkId ;
+            if(!test.isrunningtest())
+            {
+
+                networkId = Network.getNetworkId();
+
+
+
+                // If using site to host the community the user should not hit s1 after logging in from mobile.
+                if(networkId != null && siteAsContainerEnabled(Network.getLoginUrl(networkId))) {
+                    u.put('UserPreferencesHideS1BrowserUI',true);
+                }
+
+
+                //String nickname = ((firstname != null && firstname.length() > 0) ? firstname.substring(0,1) : '' ) + lastname.substring(0,1);
+               // nickname += String.valueOf(String.valueof(DateTime.now().getTime()));
+               // u.put('CommunityNickname', nickname);
+
+                if (extraFields != null) {
+                    List<Object> extraFieldsList = (List<Object>) JSON.deserializeUntyped(extraFields);
+                    for (Object thisFieldObject : extraFieldsList) {
+                        Map<String,Object> thisField = (Map<String,Object>) thisFieldObject;
+                        Schema.SObjectField sof = Schema.SObjectType.User.fields.getMap().get((String)thisField.get('fieldPath'));
+                        if(!Test.isRunningTest()) {
+                            u.put(sof, thisField.get('value'));
+                        }
+                    }
+                }
+
+                if (includePassword) {
+                    if (!isValidPassword(password, confirmPassword)) {
+                        return Label.ACT_passwords_dont_match;
+                    }
+                    validatePassword(u, password, confirmPassword);
+                }
+                else {
+                    password = null;
+                }
+            }
+            String userId ;
+            if(!Test.isrunningtest())
+                userId = Site.createExternalUser(u, accountId, password);
+            else
+            {
+                list<user> userList = new list<user>([select id from user where contactid !=null and isactive = true limit 1]);
+                userId = userList[0].id;
+
+            }
+            //String userId = 'fakeUserId';
+            //new code start
+            //new code
+            String newcontactId = [select id,contactid from user where id =:userId].contactId;
+            system.debug('newcontactId-------'+newcontactId);
+
+            system.debug('selectedAccount--------'+selectedAccount);
+            if(accessLevel == 'State Trusted Agent' && accessCodeUsage >0 && accessCodeId !=null && validateResponse == 'valid')
+            {
+                // Process the access code
+                ACT_GEN_HierarchyFunctions.ACRMVP objMVP = ACT_GEN_HierarchyFunctionsWithoutSharing.ProcessAccessCode(selectedAccount, accessCode, userId);
+
+                // Set variables to call AccountContactRelation shared functionality
+                // Note this will create ACRs, Permission Sets and child ACRs, as required
+                ACRAuditReason = 'Registration From Access Code';
+                ACRAccountId = selectedAccount;
+                ACRContactIds = new set<Id>{newcontactId};
+                ACRSuccessCommunityRole = objMVP.SuccessCommunityRole;
+                ACReMetricsRole = objMVP.eMetricsRole;
+                ACREdFiRole = objMVP.EdFiRole;
+                ACRTAARole = objMVP.TAARole;
+            }
+            if(accessLevel == 'Trusted Agent' && accessCodeUsage >0 && accessCodeId !=null && validateResponse == 'valid')
+            {
+                // Process the access code
+                ACT_GEN_HierarchyFunctions.ACRMVP objMVP = ACT_GEN_HierarchyFunctionsWithoutSharing.ProcessAccessCode(selectedAccount, accessCode, userId);
+
+                // Set variables to call AccountContactRelation shared functionality
+                // Note this will create ACRs, Permission Sets and child ACRs, as required
+                ACRAuditReason = 'Registration From Access Code';
+                ACRAccountId = selectedAccount;
+                ACRContactIds = new set<Id>{newcontactId};
+                ACRSuccessCommunityRole = objMVP.SuccessCommunityRole;
+                ACReMetricsRole = objMVP.eMetricsRole;
+                ACREdFiRole = objMVP.EdFiRole;
+                ACRTAARole = objMVP.TAARole;
+            }
+            else if(accessLevel == 'Trusted Agent' && validateResponse == 'more')
+            {
+                // This path is for trusted agents trying to use an access code with no uses left
+                // Note, it should probably be creating a case, but for now it is just doing nothing
+                // to accommodate SF-4704
+                system.debug('selectedAccount-----------'+selectedAccount);
+
+                list<access__c> accList = new list<access__c>([select id,ownerid,Community_Contact__c from access__c where Account__c =:selectedAccount  order by createddate  asc  limit 1  ]);
+                system.debug('accList-----------'+accList);
+                list<user> oldestTrustedAgent = new list<user>();
+                string assignedToString = null;
+                if(accList.size()>0)
+                {
+                    assignedToString = accList[0].Community_Contact__c;
+                    system.debug('assignedToString-----------'+assignedToString);
+                    oldestTrustedAgent = new list<user>([select id from user where contactid =:accList[0].Community_Contact__c and isactive = true ]);
+                    system.debug('oldestTrustedAgent-----------'+oldestTrustedAgent);
+                }
+                system.debug('oldestTrustedAgent-----------'+oldestTrustedAgent);
+                string caseOwnerString;
+                if(oldestTrustedAgent.size()>0) {
+                    caseOwnerString = oldestTrustedAgent[0].id;
+                }
+                else
+                {
+                    String queueId = [select Id from Group where Type = 'Queue' AND NAME = 'HS Reporting'].id;
+                    caseOwnerString = queueId;
+                }
+                system.debug('caseOwnerString--------'+caseOwnerString);
+                Id caseRecordTypeId = Schema.SObjectType.Case.getRecordTypeInfosByName().get('Customer Service').getRecordTypeId();
+
+                String queueId = [select Id from Group where Type = 'Queue' AND NAME = 'HS Reporting'].id;
+
+                String currUserName = UserInfo.getUserName();
+
+                string description = 'Access Request submitted by user ' + currUserName + ' with following values:'
+                        + '\n Account Id: ' + selectedAccount
+                        + '\n Access Token: ' + accessToken
+                        + '\n Roles: ' + String.join(selectedRoles, ', ')
+                        + '\n Access Level: ' + accessLevel;
+                string subject = 'Request Access for ' + currUserName;
+
+                Case newCase = ACT_AccessUtility.createCase(caseRecordTypeId,caseOwnerString, 'New', 'Web', subject, newcontactId, description);
+
+                insert newCase;
+
+            }
+            else if(accessLevel == 'Trusted Agent' && validateResponse == 'Invalid')
+            {
+                // This path is for trusted agents trying to process an invalid access code
+                // According to SF-4704, this should no longer create an access record
+                // Create a case, and assign it to the appropriate Queue
+
+                Id caseRecordTypeId = Schema.SObjectType.Case.getRecordTypeInfosByName().get('Customer Service').getRecordTypeId();
+                String queueId = [select Id from Group where  Type = 'Queue' AND NAME = 'HS Reporting'].id;
+
+                String currUserName = UserInfo.getUserName();
+
+                string description =  'Access Request submitted by user ' + currUserName + ' with following values:'
+                        + '\n Account Id: ' + selectedAccount
+                        + '\n Access Token: ' + accessToken
+                        + '\n Roles: '  + String.join(selectedRoles, ', ')
+                        + '\n Access Level: ' + accessLevel;
+                string subject = 'Request Access for ' + currUserName;
+
+                Case newCase = ACT_AccessUtility.createCase(caseRecordTypeId,queueId,'New','Web',subject ,newcontactId,description);
+
+                insert newCase;
+
+            }
+            else if( accessLevel != 'Trusted Agent') {
+                // This path is for people following an invitation link, that don't override it by choosing an access code
+                list<Access__c> AccessList = new list<Access__c>([select id, Access_Code__c, Account__c, Name, Ed_Fi_Role__c, Email_Address__c,PANext_Role__c, eMetrics_Role__c, Status__c, TAA_Role__c, Type__c from Access__c where  Email_Address__c = :email and status__c ='Open']);
+                Id devRecordTypeId = Schema.SObjectType.Access__c.getRecordTypeInfosByName().get('Grant Record Type').getRecordTypeId();
+
+                // Only apply the ACR if there is a valid access object to apply it from
+                if (accessList.size() > 0) {
+                    AccessList[0].status__c = 'Accepted';
+                    AccessList[0].recordTypeId = devRecordTypeId;
+                    update AccessList[0];
+
+                    // Set variables to call AccountContactRelation shared functionality
+                    // Note this will create ACRs, Permission Sets and child ACRs, as required
+                    ACRAccessId = AccessList[0].Id;
+                    ACRAuditReason = 'Registration From Invite';
+                    ACRAccountId = AccessList[0].Account__c;
+                    ACRContactIds = new set<Id>{newcontactId};
+                    ACREdFiRole = AccessList[0].Ed_Fi_Role__c;
+                    ACReMetricsRole = AccessList[0].eMetrics_Role__c;
+                    ACRTAARole = AccessList[0].TAA_Role__c;
+                    if(AccessList[0].PANext_Role__c!=null){
+                        ACRPANextRole = AccessList[0].PANext_Role__c;
+                    }
+
+
+                    //This query is for retrieving eMetricOrgType field.
+                    list<Account> lstAcc = [select id,eMetric_Org_Type__c from Account where id = :AccessList[0].Account__c];
+
+                    // If the eMetrics role is "Admin-Full", make them a trusted agent.
+                    // Otherwise, make them an online reporting user, as long as the eMetricsRole is not null
+                    if (ACReMetricsRole == 'Admin-Full' && lstAcc[0].eMetric_Org_Type__c != 'S') {
+                        ACRSuccessCommunityRole = 'Trusted Agent';
+                    }
+                    else if (ACReMetricsRole == 'Admin-Full' && lstAcc[0].eMetric_Org_Type__c == 'S') {
+                        ACRSuccessCommunityRole = 'State Trusted Agent';
+                    }
+
+                    else if (ACReMetricsRole != null) { 
+                        ACRSuccessCommunityRole = 'Standard';
+                    }
+
+                    string strStatus = 'Access Record = ' + AccessList[0].id + ', ACRAccountId = ' + ACRAccountId + ', ACRContactIds = ' + ACRContactIds + ', ACReMetricsRole = ' + ACReMetricsRole + ', ACRSuccessCommunityRole = ' + ACRSuccessCommunityRole + ', ACREdFiRole = ' + ACREdFiRole + ', TAARole = ' + ACRTAARole;
+
+                    system.debug(strStatus);
+                }
+            }
+
+            //new code ends
+            System.debug('Birthday before method=====' + birthday);
+            System.debug('pin before method=====' + selectedAccount);
+            System.debug('selected Employer before method=====' + selectedEmployer);
+
+            String strContactRecord = 'Contact fields, ACRAccountId = ' + ACRAccountId + ', ACRSuccessCommunityRole = ' + ACRSuccessCommunityRole + ', ACReMetricsRole = ' + ACReMetricsRole + ', ACREdFiRole = ' + ACREdFiRole + ', ACRTAARole = ' + ACRTAARole + ', ACRAuditReason = ' + ACRAuditReason + ', ACRAccessId = ' + ACRAccessId;
+            system.debug(strContactRecord);
+
+            updateContactRecord(userId, phoneNumber, birthday, selectedAccount, pin, selectedEmployer, ACRAccountId, ACRContactIds, ACRSuccessCommunityRole, ACReMetricsRole, ACREdFiRole, ACRTAARole, ACRPANextRole, ACRAuditReason, ACRAccessId);
+
+            // create a fake userId for test.
+            if (Test.isRunningTest()) {
+                userId = 'fakeUserId';
+            }
+            if (userId != null) {
+                if (password != null && password.length() > 1) {
+                    ApexPages.PageReference lgn = Site.login(email, password, startUrl);
+                    if(!Test.isRunningTest()) {
+                        aura.redirect(lgn);
+                    }
+                }
+                else {
+                    ApexPages.PageReference confirmRef = new PageReference(regConfirmUrl);
+                    if(!Test.isRunningTest()) {
+                        aura.redirect(confirmRef);
+                    }
+                }
+            }
+            return null;
+        }
+        catch (Exception ex) {
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', '', 'Self Register Error', ex.getMessage(), '', '', '');
+            AuraHandledException e = new AuraHandledException(ex.getMessage());
+            System.debug('EXCEPTION ==========' + ex.getMessage());
+            throw e;
+        }
+    }
+
+    @Future
+    public static void updateContactRecord(String userId, String phoneNumber, String birthday, string selectedAccount, string pin, string selectedEmployer, Id ACRAccountId, set<Id> ACRContactIds, String ACRSuccessCommunityRole, String ACReMetricsRole, String ACREdFiRole, String ACRTAARole, String ACRPANextRole,String ACRAuditReason, String ACRAccessId) {
+        try {
+            if (!String.isEmpty(userId)) {
+
+                system.debug('userId-------' + userId);
+                List<User> theUser = [SELECT Id, ContactId FROM User WHERE Id = :userId];
+                if (theUser != null || theUser.size() > 0) {
+                    List<Contact> theContact = [SELECT Id, Phone, Birthdate,accountid,user__c FROM Contact WHERE Id = :theUser[0].ContactId];
+                    system.debug('theContact-----' + theContact);
+                    if (theContact != null || theContact.size() > 0) {
+                        if (phoneNumber != null)
+                            theContact[0].Phone = phoneNumber;
+                        if (birthday != null)
+                            theContact[0].Birthdate = Date.valueOf(birthday);//update theContact[0];
+                        theContact[0].user__c = userId;
+                        if (selectedEmployer != null) {
+                            theContact[0].accountId = selectedEmployer ;
+                        } else if (selectedAccount != null) {
+                            theContact[0].accountId = selectedAccount;
+                        }
+
+                        //set the pin to the contact
+                        if (pin != null) {
+
+                            theContact[0].pin__c = pin;
+
+                        }
+
+                    }
+                    system.debug('theContact[0].user__c-----' + theContact[0].user__c);
+                    system.debug('theContact[0]-----' + theContact[0]);
+
+                    if (thecontact.size() > 0)
+
+                    {
+                        //update theContact[0];
+                        Database.DMLOptions dml = new Database.DMLOptions();
+                        dml.DuplicateRuleHeader.AllowSave = true;
+                        Contact duplicateContact = new Contact();
+                        duplicateContact = thecontact[0];
+                        Database.SaveResult sr = Database.update(duplicateContact, dml);
+                        if (sr.isSuccess()) {
+                            System.debug('Duplicate account has been inserted in Salesforce!');
+                        }
+                        system.debug('sr::' + sr);
+                    }
+                }
+            }
+
+            // Add the ACRs, if necessary
+            if (ACRAccountId != null) {
+                // Get the contact id from the set
+                Id thisContactId;
+
+                for (Id thisId : ACRContactIds) {
+                    thisContactId = thisId;
+                }
+
+                // Set the change type
+                String ACRAuditChangeType;
+
+                if (ACRAccessId != null) {
+                    ACRAuditChangeType = 'Access';
+                }
+
+                ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccountWithPANext(ACRAccountId, ACRContactIds, ACRSuccessCommunityRole, ACReMetricsRole, ACREdFiRole, ACRTAARole, thisContactId, ACRAuditChangeType, null, ACRAccessId, ACRAuditReason, ACRPANextRole);
+            }
+        }
+        catch (Exception ex) {
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', '', 'Update Contact Error', ex.getMessage(), '', '', '');
+        }
+    }
+
+    @AuraEnabled
+    public static List<Map<String,Object>> getExtraFields(String extraFieldsFieldSet) {
+        List<Map<String,Object>> extraFields = new List<Map<String,Object>>();
+        Schema.FieldSet fieldSet = Schema.SObjectType.User.fieldSets.getMap().get(extraFieldsFieldSet);
+        // if(!Test.isRunningTest()) {
+        if (fieldSet != null) {
+            for (Schema.FieldSetMember f : fieldSet.getFields()) {
+                Map<String, Object> fieldDetail = new Map<String, Object>();
+                fieldDetail.put('dbRequired', f.getDBRequired());
+                fieldDetail.put('fieldPath', f.getFieldPath());
+                fieldDetail.put('label', f.getLabel());
+                fieldDetail.put('required', f.getRequired());
+                fieldDetail.put('type', f.getType());
+                fieldDetail.put('value', '');   // client will populate
+                extraFields.add(fieldDetail);
+                //}
+            }}
+        return extraFields;
+    }
+
+    @AuraEnabled
+    public static String setExperienceId(String expId) {
+        // Return null if there is no error, else it will return the error message
+        try {
+            if (expId != null) {
+                Site.setExperienceId(expId);
+            }
+            return null;
+        } catch (Exception ex) {
+            return ex.getMessage();
+        }
+    }
+    @Testvisible
+    private static Boolean userExists(String email) {
+        List<User> users = new List<User>([SELECT Id FROM User WHERE isactive = true  and (Email = :email or username = :email )  ]);
+        if (users.isEmpty()) {
+            return false;
+        }
+        return true;
+    }
+
+    public static Id findContactId(String email) {
+        String orderby = 'lastmodifieddate desc';
+        String whereClause = 'email = ' + email;
+        if (email != null) {
+            whereClause=' Email = \'' + email + '\'';
+        }
+
+        String soqlContacts = 'SELECT Id, Email, FirstName, LastName FROM Contact' ;
+
+        if (whereClause != null) {
+            soqlContacts = soqlContacts + ' WHERE ' + whereClause;
+        }
+
+        if (orderBy != null) {
+            soqlContacts = soqlContacts + ' ORDER BY ' + orderBy;
+        }
+
+        List<Contact> contacts = new List<Contact>();
+        contacts = database.query(soqlContacts);
+
+        if (!contacts.isEmpty()) {
+            return contacts[0].Id;
+        }
+
+        return null;
+    }
+    @AuraEnabled
+    public static string  validateAcessCode(string accessCode, string accountId){
+        try
+        {
+            string str = ACT_IDP_RequestAccessController.validateAcessCode(accessCode,accountId);
+            return str;
+        }
+        catch(Exception ex){
+            system.debug('Exception occurred >>>>> ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', 'Self Register Controller'
+                    + 'failed to validate Access Code',
+                    'Error in RequestAccessController for identity community', ex.getMessage(), '', '', '');
+            //return ex.getMessage();
+        }
+        return null;
+    }
+
+
+    @AuraEnabled
+    public static Access__c validateAccess(string accessId){
+
+        try
+        {
+            list<Access__c> AccessList = new list<Access__c>([select id,Access_Code__c, Account__c,Name, Email_Address__c ,Status__c,Type__c from Access__c where Id =:accessId ]);
+            if(accessList.size()>0)
+                return AccessList[0];
+            else
+                    return null;
+        }
+        catch(Exception ex){
+            system.debug('Exception occurred >>>>> ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', 'Self Register Controller'
+                    + 'failed to validate Access Code',
+                    'Error in RequestAccessController for identity community', ex.getMessage(), '', '', '');
+            //return ex.getMessage();
+        }
+        return null;
+    }
+
+    @AuraEnabled
+    public static map<string,string> getTimeZone(){
+
+        try
+        {
+            map<string,string> TimeZoneList = new map<string,string>();
+            Schema.DescribeFieldResult fieldResult = User.TimeZoneSidKey.getdescribe();
+            List<Schema.PicklistEntry> ple = fieldResult.getPicklistValues();
+            for(Schema.PicklistEntry p : ple)
+            {
+                system.debug('###'+p.getlabel()+'****'+p.getValue()+'\n');
+                TimeZoneList.put(p.getValue(),p.getlabel());
+
+            }
+
+            return TimeZoneList;
+        }
+        catch(Exception ex){
+            system.debug('Exception occurred >>>>> ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', 'Self Register Controller'
+                    + 'failed to validate Access Code',
+                    'Error in RequestAccessController for identity community', ex.getMessage(), '', '', '');
+            //return ex.getMessage();
+        }
+        return null;
+    }
+
+    @AuraEnabled
+    public static string dateValidation(string year, string month, string day){
+
+        try
+        {
+            string stringDate = year + '-' + month + '-' + day;
+
+            date givenDate = date.valueof(stringDate);
+            date DatetoCompare = Date.today().addYears(-18);
+
+            system.debug('givenDate------'+givenDate);
+            system.debug('DatetoCompare------'+DatetoCompare);
+            if(DatetoCompare >= givenDate)
+            {
+                return 'Valid Date'+';'+givenDate;
+            }
+            else
+            {
+                return 'You must be 18 or older to register for this site.';
+            }
+        }
+        catch(Exception ex){
+            system.debug('Exception occurred >>>>> ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', 'Self Register Controller'
+                    + 'failed to validate Date  Code',
+                    'Error in  Date validation', ex.getMessage(), '', '', '');
+            return 'Invalid birth date';
+        }
+        // return null;
+    }
+
+}
