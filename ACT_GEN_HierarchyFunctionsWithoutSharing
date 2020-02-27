@@ -1,0 +1,69 @@
+/**
+ * Created by adamsm on 4/4/2019.
+ */
+
+public without sharing class ACT_GEN_HierarchyFunctionsWithoutSharing {
+    public static void AccountsAccessRecalculate(List<Account> Accounts, Map<Id, Account> OldAccounts) {
+        ACT_GEN_HierarchyFunctions.AccountsAccessRecalculate(Accounts, OldAccounts);
+    }
+
+    public static void deactivateUsers(set<Id> ContactIds) {
+        ACT_GEN_HierarchyFunctions.deactivateUsers(ContactIds);
+    }
+
+    public static map<id, map<integer, boolean>> getAccountIdToApprovalNeededMap(set<id> AccountIds, Boolean LimitToApprovalNeeded) {
+        return ACT_GEN_HierarchyFunctions.getAccountIdToApprovalNeededMap(AccountIds, LimitToApprovalNeeded);
+    }
+
+    public static map<id, list<Account>> getAccountIdToChildrenMap(set<id> AccountIds, boolean IncludePassedAccounts, boolean IncludeInactiveAccounts) {
+        return ACT_GEN_HierarchyFunctions.getAccountIdToChildrenMap(AccountIds, IncludePassedAccounts, IncludeInactiveAccounts);
+    }
+
+    public static map<id, map<integer, Hierarchy_Approval__c>> getAccountIdToHierarchyApprovalMap (set<id> AccountIds) {
+        return ACT_GEN_HierarchyFunctions.getAccountIdToHierarchyApprovalMap(AccountIds);
+    }
+
+    public static map<id, boolean> getAccountIdToApprovedMap (set<id> AccountIds) {
+        return ACT_GEN_HierarchyFunctions.getAccountIdToApprovedMap(AccountIds);
+    }
+
+    public static map<id, id> getAccountIdToParentIdMap (set<id> AccountIds, set<String> ParentTypes) {
+        return ACT_GEN_HierarchyFunctions.getAccountIdToParentIdMap(AccountIds, ParentTypes);
+    }
+
+    public static map<id, list<AccountContactRelation>> getAccountIdToUserMap (set<id> AccountIds, boolean ActiveOnly, string LimitToRole) {
+        return ACT_GEN_HierarchyFunctions.getAccountIdToUserMap (AccountIds, ActiveOnly, LimitToRole);
+    }
+
+    public static map<id, string> getAccountIdToRoleMapForUser (id UserId, boolean ActiveOnly, string LimitToRole) {
+        return ACT_GEN_HierarchyFunctions.getAccountIdToRoleMapForUser (UserId, ActiveOnly, LimitToRole);
+    }
+
+    public static boolean getHierarchyApprovalNeededForUser(string UserId) {
+        return ACT_GEN_HierarchyFunctions.getHierarchyApprovalNeededForUser (UserId);
+    }
+
+    public static list<Account> getHierarchyByHierarchyApproval (Id HierarchyApprovalId) {
+        return ACT_GEN_HierarchyFunctions.getHierarchyByHierarchyApproval(HierarchyApprovalId);
+    }
+
+    public static boolean getPropagateACRToChildren (Access__c accessRecord, Account accountRecord) {
+        return ACT_GEN_HierarchyFunctions.getPropagateACRToChildren(accessRecord, accountRecord);
+    }
+
+    public static void grantContactsACRToAccount(Id AccountId, set<Id> ContactIds, String SuccessCommunityRole, String eMetricsRole, String EdFiRole, String TAARole, Id AuditChangeByContact, String AuditChangeType, List<SObject> AuditChangeTypeRecords, String AuditChangeTypeId, String AuditReason) {
+        ACT_GEN_HierarchyFunctions.grantContactsACRToAccount(AccountId, ContactIds, SuccessCommunityRole, eMetricsRole, EdFiRole, TAARole, AuditChangeByContact, AuditChangeType, AuditChangeTypeRecords, AuditChangeTypeId, AuditReason);
+    }
+
+    public static ACT_GEN_HierarchyFunctions.ACRMVP ProcessAccessCode(Id accountId, String accessCode, Id userId) {
+        return ACT_GEN_HierarchyFunctions.ProcessAccessCode(accountId, accessCode, userId);
+    }
+
+    public static void setACRAccess(list<ACT_GEN_HierarchyFunctions.ACRMVP> AccessList) {
+        ACT_GEN_HierarchyFunctions.setACRAccess(AccessList);
+    }
+
+    public static void grantContactsACRToAccountWithPANext(Id AccountId, set<Id> ContactIds, String SuccessCommunityRole, String eMetricsRole, String EdFiRole, String TAARole, Id AuditChangeByContact, String AuditChangeType, List<SObject> AuditChangeTypeRecords, String AuditChangeTypeId, String AuditReason, String OLRAccessLevel) {
+        ACT_GEN_HierarchyFunctions.grantContactsACRToAccountWithPANext(AccountId, ContactIds, SuccessCommunityRole, eMetricsRole, EdFiRole, TAARole, AuditChangeByContact, AuditChangeType, AuditChangeTypeRecords, AuditChangeTypeId, AuditReason, OLRAccessLevel);
+    }
+}
