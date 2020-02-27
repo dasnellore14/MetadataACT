@@ -1,0 +1,516 @@
+<!--
+ - Created by mitulpatel on 10/30/18.
+ -->
+
+
+<aura:component description="ACT_SelfRegister"
+                controller="ACT_SelfRegisterController"
+                implements="forceCommunity:availableForAllPageTypes,lightning:isUrlAddressable"
+                extends="c:Peak_Base">
+
+    <aura:attribute name="accessCodeId" type="string" />
+    <aura:attribute name="accessCodeUsage" type="integer" />
+    <aura:attribute name="validateResponse" type="String" />
+    <aura:attribute name="haveAcessCode" type="boolean" default="false"/>
+    <aura:attribute name="accessCode" type="String" />
+    <aura:attribute name="accountId" type="String" required="false"
+                    description="accountId for creating the user. If not specified, it will create a PersonAccount if possible for B2C scenario. Or otherwise if it's in a community, the community's self-registration accountId will be used."/>
+    <aura:attribute name="birthDateValid" type="boolean" default="false" />
+    <aura:attribute name="birthMonth" type="string[]" />
+    <aura:attribute name="birthYear" type="string[]" />
+    <aura:attribute name="UrlAccessId" type="string" />
+    <aura:attribute name="trustedAgentType" type="String" />
+    <aura:attribute name="regConfirmUrl" type="String" required="false" />
+    <aura:attribute name="startUrl" type="String" required="false"
+                    description="The url you go to after a successful login"/>
+    <aura:attribute name="showError" type="Boolean" required="true" description="" default="false" access="private"/>
+    <aura:attribute name="errorMessage" type="String" required="false" description="" access="private"/>
+    <aura:attribute name="firstnameLabel" type="String" required="false" default="First Name"/>
+    <aura:attribute name="lastnameLabel" type="String" required="false" default="Last Name"/>
+    <aura:attribute name="nicknameLabel" type="String" required="false" default="Nickname"/>
+    <aura:attribute name="emailLabel" type="String" required="false" default="Email"/>
+    <aura:attribute name="passwordLabel" type="String" required="false" default="Create Password"/>
+    <aura:attribute name="confirmPasswordLabel" type="String" required="false" default="Confirm Password"/>
+    <aura:attribute name="submitButtonLabel" type="String" required="false" default="Verify Account"/>
+    <aura:attribute name="includePasswordField" type="Boolean" required="false" default="false"
+                    description="Whether to include password"/>
+    <aura:attribute name="extraFieldsFieldSet" type="String" required="false"
+                    description="A field set name whose fields are desired for user registration"/>
+    <aura:attribute name="extraFields" type="list" required="false"
+                    description="A field set name whose fields are desired for user registration"/>
+    <aura:handler name="init" value="{!this}" action="{!c.initialize}"/>
+    <aura:attribute name="expid" type="String" required="false" description="The branding experience ID"/>
+    <aura:attribute name="disableSubmitButton" type="Boolean"  default="false"/>
+    <aura:attribute name="disableshowAccess" type="boolean" default="false" />
+    <aura:attribute name="consentChecked" type="Boolean"  default="false"/>
+    <aura:attribute type="List" name="selectedRoles" default="[]" />
+    <aura:attribute name ="selectedAccount" type="sObject"/>
+    <aura:attribute name ="selectedEmployer" type="sObject"/>
+    <aura:attribute name ="workEmail" type="string" />
+    <aura:attribute name="debugMode" type="Boolean" access="global" default="true"/>
+    <aura:attribute name="DOBShowError" type="boolean" default="false" />
+    <aura:attribute name="DOBErrorMessage" type="string" />
+
+    <aura:attribute name="dayEntered" type="string" />
+    <aura:attribute name="birthday" type="Date" />
+
+    <aura:registerevent name="sitePropagatedStartUrl" type="c:setStartUrl"/>
+    <aura:handler name="init" value="{!this}" action="{!c.initialize}"/>
+    <aura:dependency resource="c:setStartUrl" type="EVENT"/>
+    <!-- Please uncomment-->
+    <aura:dependency resource="siteforce:registerQueryEventMap" type="EVENT"/>
+
+    <aura:handler event="c:setStartUrl" action="{!c.setStartUrl}"/>
+    <aura:handler event="c:setExpId" action="{!c.setExpId}"/>
+    <aura:dependency resource="c:setExpId" type="EVENT"/>
+    <aura:attribute name="validateCount" type="Integer" default="0" />
+    <aura:attribute name="validateshowError" type="Boolean" required="true" description="" default="false" access="private"/>
+    <aura:attribute name="validateerrorMessage" type="String" required="false" description="" access="private"/>
+    <aura:attribute name="validateshowSuccess" type="Boolean" required="true" description="" default="false" access="private"/>
+    <aura:attribute name="validateSuccessMessage" type="String" required="false" description="" access="private"/>
+
+    <meta name="viewport" content="width=device-width,height=device-height,initial-scale=1.0"/>
+    <aura:attribute name="validateSpinnerClass" type="String" default="slds-hide"/>
+    <aura:attribute name="timeZoneList" type="String[]" />
+    <aura:attribute name="myActUrl" type="String" default="http://www.myact.org"/>
+    <aura:attribute name="pin" type="String" required="false" />
+    <aura:attribute name="UsertimeZone" type="string" />
+    <aura:attribute name="logoutSource" type="string"/>
+
+    <aura:handler name="change" value="{!v.dayEntered}" action="{!c.checkDateValidation}" />
+
+
+    <div >
+        <aura:renderIf isTrue="{!v.showError}">
+            <div id="error">
+                <ui:outputRichText value="{!v.errorMessage}"/>
+            </div>
+        </aura:renderIf>
+        <!--center>
+            <p class="slds-m-bottom_large">Enter your Information below to create and verify your organizational account with ACT.
+        </p>
+        </center-->
+        <div class="slds-m-vertical--small"></div>
+        <center>
+            <p class="slds-m-bottom_medium">
+                <img src="{!$Resource.IcoMoon+'/PNG/16px/0155-graduation.png'}"/>
+                &nbsp;<a onclick="{!c.handleURLRedirect}" >Click here to register a student to take the ACT test. </a>
+
+            </p>
+        </center>
+        <lightning:layout multipleRows="true" pullToBoundary="small" verticalAlign="stretch">
+
+            <lightning:layoutItem size="12" mediumDeviceSize="6" padding="around-small">
+                <lightning:input aura:id="firstname" label="First Name" type="text" name="firstName"  onchange="{!c.checkNameValidation}"
+                />
+            </lightning:layoutItem>
+            <lightning:layoutItem size="12" mediumDeviceSize="6" padding="around-small">
+                <lightning:input aura:id="lastname" label="Last Name" type="text" name="lastName" onchange="{!c.checkNameValidation1}"
+                                 messageWhenValueMissing="Please enter your last name"/>
+            </lightning:layoutItem>
+        </lightning:layout>
+
+
+        <div class="slds-grid slds-grid_align-spread ">
+
+            <div class="slds-col  ">
+                <label class="slds-form-element__label" style="margin-right: 0.5rem;">Birth Month</label>
+                <lightning:helptext  class="customIcon" content="You must be over 18 to register for this site. Your birthday is also used to help verify your identity when you communicate with ACT Customer Care." />
+                <lightning:select name="select" label= "" class="hideLabel" aura:id="birthMonth"  onchange="{!c.checkDateValidation}" >
+                    <aura:iteration items="{!v.birthMonth}" var="month">
+                        <option value="{!month.key}" >{!month.value}</option>
+                    </aura:iteration>
+                </lightning:select>
+
+            </div>
+            <div class="slds-col ">
+                <label class="slds-form-element__label" style="margin-right: 0.5rem;">Birth Day</label>
+
+                <lightning:input class="hideLabel"    aura:id="birthDay" name="birthDay" value="{!v.dayEntered}" style="vertical-align:top;width:50px"/>
+
+            </div>
+            <div class="slds-col ">
+                <lightning:select name="select" label="Birth Year"  aura:id="birthYear" onchange="{!c.checkDateValidation}" >
+                    <aura:iteration items="{!v.birthYear}" var="time">
+                        <option text="{!time}"></option>
+                    </aura:iteration>
+                </lightning:select>
+            </div>
+
+        </div>
+        <aura:renderIf isTrue="{!v.DOBShowError}">
+            <div id="error" style="color: rgb(194, 57, 52);font-size: .75rem;">
+                <ui:outputRichText value="{!v.DOBErrorMessage}"/>
+            </div>
+        </aura:renderIf>
+
+        <div class="slds-p-vertical--xx-small"/>
+
+
+        <lightning:input class="slds-p-vertical_small" type="email" aura:id="workEmail" label="Work Email  ( You'll sign in with this, and you'll verify it to create your account.)" name="email"
+                         onchange="{!c.checkEmailChange}"
+                         messageWhenValueMissing="Please enter your work email" value="{!v.workEmail}"/>
+        <lightning:input class="slds-p-vertical_small" type="tel" aura:id="phone" label="Work Phone" name="phone"
+                         value="" onchange="{!c.checkPhoneChange}" />
+        <div class="slds-p-vertical--xx-small"/>
+        <!--class="slds-form-element__label"-->
+        <label class="slds-form-element__label " style="margin-right: 0.5rem;">PIN</label>
+
+        <lightning:helptext class="customIcon" content="Your PIN is used to help verify your identity when you communicate with ACT Customer Care. Use 4-6 numbers you'll remember, such as a street number, end of a phone number, or the month/day of an important date." />
+
+        <!--class="slds-p-vertical_small"-->
+        <lightning:input  class="hideLabel" type="tel" aura:id="pin" name="PIN" value="{!v.pin}" maxlength="6" minlength="4" onchange="{!c.checkPinValidation}" messageWhenValueMissing="Please enter your PIN"  />
+
+        <div class="slds-p-vertical_small"/>
+
+
+        <label class="slds-form-element__label " style="margin-right: 0.5rem;">Nickname</label>
+
+        <lightning:helptext class="customIcon" content="This name will be displayed when you interact with ACT staff and other users on success.act.org." />
+
+        <lightning:input class="hideLabel" aura:id="nickname" type="text" name="nickname" onchange="{!c.checkNicknameValidation}" minlength="1" maxlength="40"
+                         messageWhenValueMissing="Please enter desired Nickname"/>
+
+        <div class="slds-p-vertical--xx-small"/>
+        <lightning:select name="select" label="Time Zone" aura:id="tZone"  class="slds-p-vertical_small" onchange="{!c.checkDisableButton}" >
+            <aura:iteration items="{!v.timeZoneList}" var="timezone">
+                <option value="{!timezone.key}" selected ="{!timezone.key == v.UsertimeZone}">{!timezone.value}</option>
+            </aura:iteration>
+        </lightning:select>
+
+        <div class="slds-m-top--small">
+            <label class="slds-form-element__label" style="margin-right: 0.5rem;">Employer</label>
+            <lightning:helptext class="customIcon" content="If you can't find your organization, you can leave this blank for now."/>
+            <label class="slds-form-element__label" style="margin-right: 0.5rem;">&nbsp;(optional)</label>
+
+            <c:CC_SC_CustomLookup objectAPIName="Account"  IconName="standard:account"
+                                  selectedRecord="{!v.selectedEmployer}"
+                                  soslOverride="Select Name, BillingState, BillingCity, Account_Record_Type__c From Account Where Name LIKE: searchKey and Active__c = true and (RecordType.Name = 'Customer Account' Or RecordType.Name = 'Prospect Customer') order by Name Limit 50"
+                                  sharingRule="WithoutSharing"/>
+        </div>
+
+        <aura:iteration aura:id="extraFields" items="{!v.extraFields}" var="curField" indexVar="index">
+            <div id="sfdc_extrafield_container" class="sfdc">
+                <span id="sfdc_user" class="login-icon" data-icon="a"></span>
+                <ui:inputText value="{!curField.value}" aura:id="{!curField.fieldPath}" placeholder="{!curField.label}"
+                              keyup="{!c.onKeyUp}" class="input sfdc_extrafieldinput sfdc"/>
+            </div>
+        </aura:iteration>
+
+        <aura:renderIf isTrue="{!v.includePasswordField}">
+            <div id="sfdc_password_container" class="sfdc">
+                <span id="sfdc_lock" class="login-icon sfdc" data-icon="c"></span>
+                <ui:inputSecret value="" aura:id="password" placeholder="{!v.passwordLabel}" keyup="{!c.onKeyUp}" class="input sfdc_passwordinput sfdc"/>
+            </div>
+
+            <div id="sfdc_confirm_password_container" class="sfdc">
+                <span id="sfdc_lock" class="login-icon sfdc" data-icon="c"></span>
+                <ui:inputSecret value="" aura:id="confirmPassword" placeholder="{!v.confirmPasswordLabel}" keyup="{!c.onKeyUp}" class="input sfdc_passwordinput sfdc"/>
+            </div>
+        </aura:renderIf>
+
+        <!--Roles-->
+        <br/>
+        <p class="slds-m-bottom_small" style="font-size: .8125rem" >Your title at this school/org: <label class="slds-form-element__label" style="margin-right: 0.5rem;">&nbsp;(optional)</label> </p>
+
+        <lightning:layout multipleRows="true" class="slds-m-bottom_large">
+            <lightning:layoutItem size="12" mediumDeviceSize="6">
+                <lightning:input type="checkbox" label="District Administrator" name="District Administrator"
+                                 value="District Admin" onchange="{!c.callCheckboxMethod }"/>
+                <lightning:input type="checkbox" label="Principal" name="Principal"
+                                 value="Principal" onchange="{!c.callCheckboxMethod }" />
+                <lightning:input type="checkbox" label="Superintendant" name="Superintendant"
+                                 value="Superintendant" onchange="{!c.callCheckboxMethod }" />
+                <lightning:input type="checkbox" label="IT/Technical" name="IT/Technical"
+                                 value="IT/Technical" onchange="{!c.callCheckboxMethod }" />
+            </lightning:layoutItem>
+            <lightning:layoutItem size="12" mediumDeviceSize="6">
+                <lightning:input type="checkbox" label="School Administrator" name="School Administrator"
+                                 value="School Admin" onchange="{!c.callCheckboxMethod }" />
+                <lightning:input type="checkbox" label="Teacher" name="Teacher"
+                                 value="Teacher" onchange="{!c.callCheckboxMethod }" />
+                <lightning:input type="checkbox" label="Counselor" name="Counselor"
+                                 value="Counselor" onchange="{!c.callCheckboxMethod }" />
+                <lightning:input type="checkbox" label="Other" name="Other"
+                                 value="Other" onchange="{!c.callCheckboxMethod }" />
+            </lightning:layoutItem>
+
+        </lightning:layout>
+
+        <div style="background-color:#F2F4F7; padding-top:10px; padding-right:10px; padding-bottom:10px; padding-left:10px;">
+            <lightning:layout>
+                <lightning:layoutItem >
+
+                    <div>
+                        <dl class="slds-list_inline slds-wrap">
+                            <dd class="slds-item_detail">
+
+                                <lightning:input variant="label-hidden" type="checkbox"  aura:id="checkboxAccessCode" id="checkboxAccessCode" name="I have an access code"
+                                                 checked="{!v.haveAcessCode}" onchange="{!c.checkAcessCode}"   />
+                            </dd>
+                            <dt>
+                                <label for="terms" style="font-size: .8125rem">&nbsp; I have an access code. &nbsp;</label>
+
+                                <lightning:helptext class="customIcon"  content="If you believe you're a Trusted Agent but you don't have an access code, leave the Access Code field empty. You can request Trusted Agent access after you create your account." />
+                                <label class="slds-form-element__label" style="margin-right: 0.5rem;">&nbsp;(optional)</label>
+                            </dt>
+                        </dl>
+
+
+
+                    </div>
+
+
+                </lightning:layoutItem>
+            </lightning:layout>
+
+            <aura:renderIf isTrue="{!v.haveAcessCode}" >
+                <div class="slds-m-top--small">
+
+                    <label class="slds-form-element__label" style="margin-right: 0.5rem;">Which school or organization is your access code for?</label>
+
+                    <c:CC_SC_CustomLookup objectAPIName="Account"  label="" IconName="standard:account"
+                                          selectedRecord="{!v.selectedAccount}"
+                                          soslOverride="Select Name, BillingState, BillingCity,eMetric_Org_Type__c From Account Where Name LIKE: searchKey And Active__c = true And (RecordType.Name = 'Customer Account' Or RecordType.Name = 'Prospect Customer') order by Name Limit 50"
+                                          sharingRule="WithoutSharing"/>
+                </div>
+
+
+                <div class="slds-m-top--small">
+
+
+                    <!--Roles-->
+                    <div class="slds-grid" >
+
+                        <div class="slds-medium-size_5-of-12">
+                            <label class="slds-form-element__label" style="margin-right: 0.5rem;">Your access code:</label>
+
+                            <lightning:input class="hideLabel" type="text" aura:id="accessToken"
+                                             label="" name="accessToken" value="{!v.accessCode}" maxlength="12"
+                                             disabled="{!v.disableshowAccess}"
+                            />
+
+                        </div>
+                        <div class="slds-medium-size_7-of-12">
+                            <div class="slds-m-vertical--large"></div>
+                            <div class="slds-m-vertical--small"></div>
+                            <lightning:button class="slds-m-horizontal--small "  variant="brand" type="button"
+                                              label="Validate" onclick="{!c.validateAccessCode}"
+                                              disabled="{!v.disableshowAccess}"
+                            />
+                        </div>
+                    </div>
+
+                    <aura:renderIf isTrue="{!v.validateshowError}">
+                        <div id="error" >
+                            <ui:outputRichText value="{!v.validateerrorMessage}"/>
+                        </div>
+                    </aura:renderIf>
+                    <aura:renderIf isTrue="{!v.validateshowSuccess}">
+                        <div style="color:green" >
+                            <ui:outputRichText value="{!v.validateSuccessMessage}"/>
+                        </div>
+                    </aura:renderIf>
+
+                </div>
+
+                <div class="slds-p-top--medium"/>
+                <aura:renderIf isTrue="{!v.trustedAgentType =='Trusted Agent'}" >
+                <label for="terms" style="font-size: .8125rem">
+                    A trusted agent is authorized to interact with ACT on an organization's behalf. Trusted agents can manage users and user permissions associated to success.act.org features for the organization selected above and any organizations below it in the organization's hierarchy.
+                </label>
+                <div class="slds-p-top--x-small"/>
+               
+                    <label for="terms" style="font-size: .8125rem" >
+                        <lightning:icon iconName="utility:warning" alternativeText="Approved" variant="error" />
+                        <b>Trusted agents have access to student data and can grant others access to student data.</b>
+                    </label>
+                </aura:renderIf>
+
+                <aura:renderIf isTrue="{!v.trustedAgentType =='State Trusted Agent'}" >
+                    <div>
+                        Access Code Type: <b>State Trusted Agent</b>
+                    </div>
+                    <br/>
+                    <label for="terms" style="font-size: .8125rem">
+                        A trusted agent is authorized to interact with ACT on an organization's behalf. Trusted agents can manage users and user permissions associated to success.act.org features for the organization selected above.
+                        <br/>
+                        Trusted Agents automatically gain access to all available features for an organization.
+                    </label>
+                    <div class="slds-p-top--x-small"/>
+
+                    <label for="terms" style="font-size: .8125rem" >
+                        <lightning:icon iconName="utility:warning" alternativeText="Approved" variant="error" />
+                        <b>Trusted agents have access to student data and can grant others access to student data.</b>
+                    </label>
+                </aura:renderIf>
+            </aura:renderIf>
+
+        </div>
+
+        <div class="slds-p-top--x-small"/>
+
+
+        <lightning:layout>
+            <lightning:layoutItem >
+
+                <div>
+                    <dl class="slds-list_inline slds-wrap">
+                        <dd class="slds-item_detail">
+                            <lightning:input variant="label-hidden" type="checkbox"  name="terms" aura:id="termsCond" id="termsCond"
+                                             onchange="{!c.checkDisableButton}"   />
+                        </dd>
+                        <dt>
+                            <div class="slds-grid slds-grid_align-spread slds-show--medium">
+                                <div class="slds-col slds-size_12-of-12 slds-medium-size_12-of-12 slds-large-size_12-of-12">
+                                    <div class="slds-grid">
+                                        <label class="slds-form-element__label" for="terms" style="font-size: .8125rem" >I agree to ACT's <a alt="Go to terms and conditions page." href="javascript:void(0)" onclick="{!c.handleActOrgTermsAndConditions}" class="linkSmall">
+                                                Terms and Conditions
+                                            </a>
+                                            and
+                                            <a alt="Go to privacy policy." href="javascript:void(0)" onclick="{!c.handlePrivacyPolicy}" class="linkSmall">Privacy Policy.</a></label>
+
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="slds-grid slds-grid_align-spread slds-hide--medium">
+                                <div class="slds-col slds-size_12-of-12">
+                                    <!-- Inner Grid Top -->
+                                    <div class="slds-grid">
+                                        <label class="slds-form-element__label" for="terms" style="font-size: .8125rem" >I agree to the success.act.org <br/> <a href="#">Terms and Conditions</a> and <a href="#">Privacy Policy.</a></label>
+
+                                    </div>
+                                </div>
+                            </div>
+
+
+                        </dt>
+                    </dl>
+
+
+
+                </div>
+
+
+            </lightning:layoutItem>
+        </lightning:layout>
+
+        <div class="slds-p-top--x-small"/>
+        <div class="slds-p-top--x-small"/>
+
+
+
+
+        <!--<div class="sfdc">-->
+        <!--<ui:button aura:id="submitButton" label="{!v.submitButtonLabel}" press="{!c.handleSelfRegister}"-->
+        <!--class="sfdc_button"/>-->
+        <!--</div>-->
+
+        <!--lightning:layout pullToBoundary="small" class="slds-p-vertical_small" >
+            <lightning:layoutItem padding="horizontal-small">
+                <lightning:input type="checkbox" label="User Consent" variant="label-hidden"  aura:id="consent" checked="{!v.consentChecked}" onchange="{!c.checkDisableButton}" />
+            </lightning:layoutItem>
+            <lightning:layoutItem>
+
+                <aura:if isTrue="{!$Browser.formFactor == 'DESKTOP'}">
+                    <div class="slds-scrollable_y" style="height: 5rem; width: 33rem;">
+                            <span class="slds-text-body_small" >
+                                    I understand that by creating an account, I consent to the processing of my personally identifying information, including the collection, use, transfer and disclosure of information, as described in the ACT Privacy Policy.
+                            </span>
+                        <div class="slds-text-longform">
+                                <span class="slds-text-body_small" >
+                                    Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse interdum vehicula sapien, luctus pharetra quam lacinia eu. Sed eu dictum justo. Suspendisse a porttitor felis, ut vestibulum tellus. Praesent mattis ligula id elit malesuada, sit amet iaculis turpis auctor. Integer pellentesque ex arcu. Nulla sapien justo, commodo ut condimentum in, consectetur eget turpis. Nullam sapien velit, egestas eu ex et, dictum gravida dolor. In consequat ex sed risus pretium accumsan. Aenean non dictum lectus, in varius dolor. Sed ac orci semper, tincidunt ipsum sit amet, tristique arcu. Proin erat tellus, bibendum at nulla quis, malesuada rhoncus ex. Nam congue dui turpis, sit amet tincidunt ex ullamcorper sit amet. Fusce lobortis, leo varius vehicula commodo, velit diam aliquam enim, quis rhoncus arcu turpis nec lacus.
+
+                                    In tincidunt bibendum fermentum. Curabitur ornare ipsum eros, varius egestas tellus bibendum non. Suspendisse potenti. Nullam aliquam faucibus tempor. Aliquam erat volutpat. Aliquam et placerat ex. Nunc gravida, nisi fermentum pharetra feugiat, urna lacus lacinia lorem, et pharetra nulla quam at arcu. Duis gravida vehicula fringilla. Suspendisse potenti. Maecenas fringilla lorem aliquet orci commodo, vitae convallis urna tincidunt. Pellentesque ornare, purus id condimentum consectetur, magna tortor ultrices nunc, vel semper nunc augue vitae neque. Sed placerat enim eu varius molestie. Ut dignissim dignissim accumsan. In euismod blandit fermentum. Pellentesque consectetur arcu eget velit vulputate dictum. Phasellus elementum tempus iaculis.
+
+                                    Cras at sollicitudin lectus, sed accumsan purus. Curabitur euismod, ante quis dictum posuere, ligula risus ullamcorper risus, eget facilisis ipsum ipsum sit amet est. Nullam molestie, purus sit amet ullamcorper placerat, metus urna sodales velit, sit amet suscipit dolor est ac turpis. Sed erat nisi, aliquam placerat cursus in, facilisis at ex. Maecenas at magna nec ipsum pharetra viverra vel id nunc. Proin ac dignissim tellus. Morbi pretium tortor vel felis lobortis lobortis hendrerit sed libero. Suspendisse at est lacus.
+
+                                    Pellentesque non nisi at metus tincidunt porttitor ac vitae enim. Vestibulum congue lacinia risus, ut finibus magna interdum a. Maecenas tellus libero, vehicula a tristique id, finibus sed purus. Ut volutpat, massa eu maximus dictum, nisi magna ornare tortor, non sodales erat dui a lacus. Maecenas non augue quis lectus ultricies dapibus. Proin sit amet blandit ante, ut pulvinar velit. Ut egestas malesuada nibh ut consectetur. Suspendisse rhoncus viverra justo pulvinar mollis. Phasellus ultricies libero augue. Integer et tortor at quam aliquet semper. In laoreet metus placerat dui venenatis, nec tempor nulla posuere. Praesent vitae hendrerit diam.
+
+                                    Phasellus dignissim felis a erat semper elementum. Nullam tincidunt ipsum nec finibus dapibus. Curabitur semper tempus nunc. Curabitur tristique justo ut aliquam semper. Nunc congue pulvinar viverra. Vivamus nec neque in odio sollicitudin commodo id in ex. Pellentesque velit enim, vulputate in quam a, interdum tempus eros. Duis at finibus elit. Suspendisse accumsan orci sit amet condimentum varius. Duis id efficitur sem, vitae mollis metus. Etiam laoreet metus nulla, a volutpat urna commodo eget.
+
+                                </span>
+                        </div>
+                    </div>
+                </aura:if>
+                <aura:if isTrue="{!$Browser.formFactor == 'TABLET'}">
+                    <div class="slds-scrollable_y" style="height: 5rem; width: 20rem;">
+                            <span class="slds-text-body_small" >
+                                    I understand that by creating an account, I consent to the processing of my personally identifying information, including the collection, use, transfer and disclosure of information, as described in the ACT Privacy Policy.
+                            </span>
+                        <div class="slds-text-longform">
+                                <span class="slds-text-body_small" >
+                                    Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse interdum vehicula sapien, luctus pharetra quam lacinia eu. Sed eu dictum justo. Suspendisse a porttitor felis, ut vestibulum tellus. Praesent mattis ligula id elit malesuada, sit amet iaculis turpis auctor. Integer pellentesque ex arcu. Nulla sapien justo, commodo ut condimentum in, consectetur eget turpis. Nullam sapien velit, egestas eu ex et, dictum gravida dolor. In consequat ex sed risus pretium accumsan. Aenean non dictum lectus, in varius dolor. Sed ac orci semper, tincidunt ipsum sit amet, tristique arcu. Proin erat tellus, bibendum at nulla quis, malesuada rhoncus ex. Nam congue dui turpis, sit amet tincidunt ex ullamcorper sit amet. Fusce lobortis, leo varius vehicula commodo, velit diam aliquam enim, quis rhoncus arcu turpis nec lacus.
+
+                                    In tincidunt bibendum fermentum. Curabitur ornare ipsum eros, varius egestas tellus bibendum non. Suspendisse potenti. Nullam aliquam faucibus tempor. Aliquam erat volutpat. Aliquam et placerat ex. Nunc gravida, nisi fermentum pharetra feugiat, urna lacus lacinia lorem, et pharetra nulla quam at arcu. Duis gravida vehicula fringilla. Suspendisse potenti. Maecenas fringilla lorem aliquet orci commodo, vitae convallis urna tincidunt. Pellentesque ornare, purus id condimentum consectetur, magna tortor ultrices nunc, vel semper nunc augue vitae neque. Sed placerat enim eu varius molestie. Ut dignissim dignissim accumsan. In euismod blandit fermentum. Pellentesque consectetur arcu eget velit vulputate dictum. Phasellus elementum tempus iaculis.
+
+                                    Cras at sollicitudin lectus, sed accumsan purus. Curabitur euismod, ante quis dictum posuere, ligula risus ullamcorper risus, eget facilisis ipsum ipsum sit amet est. Nullam molestie, purus sit amet ullamcorper placerat, metus urna sodales velit, sit amet suscipit dolor est ac turpis. Sed erat nisi, aliquam placerat cursus in, facilisis at ex. Maecenas at magna nec ipsum pharetra viverra vel id nunc. Proin ac dignissim tellus. Morbi pretium tortor vel felis lobortis lobortis hendrerit sed libero. Suspendisse at est lacus.
+
+                                    Pellentesque non nisi at metus tincidunt porttitor ac vitae enim. Vestibulum congue lacinia risus, ut finibus magna interdum a. Maecenas tellus libero, vehicula a tristique id, finibus sed purus. Ut volutpat, massa eu maximus dictum, nisi magna ornare tortor, non sodales erat dui a lacus. Maecenas non augue quis lectus ultricies dapibus. Proin sit amet blandit ante, ut pulvinar velit. Ut egestas malesuada nibh ut consectetur. Suspendisse rhoncus viverra justo pulvinar mollis. Phasellus ultricies libero augue. Integer et tortor at quam aliquet semper. In laoreet metus placerat dui venenatis, nec tempor nulla posuere. Praesent vitae hendrerit diam.
+
+                                    Phasellus dignissim felis a erat semper elementum. Nullam tincidunt ipsum nec finibus dapibus. Curabitur semper tempus nunc. Curabitur tristique justo ut aliquam semper. Nunc congue pulvinar viverra. Vivamus nec neque in odio sollicitudin commodo id in ex. Pellentesque velit enim, vulputate in quam a, interdum tempus eros. Duis at finibus elit. Suspendisse accumsan orci sit amet condimentum varius. Duis id efficitur sem, vitae mollis metus. Etiam laoreet metus nulla, a volutpat urna commodo eget.
+
+                                </span>
+                        </div>
+                    </div>
+                </aura:if>
+                <aura:if isTrue="{!$Browser.formFactor == 'PHONE'}">
+                    <div class="slds-scrollable_y" style="height: 5rem; width: 15rem;">
+                            <span class="slds-text-body_small" >
+                                    I understand that by creating an account, I consent to the processing of my personally identifying information, including the collection, use, transfer and disclosure of information, as described in the ACT Privacy Policy.
+                            </span>
+                        <div class="slds-text-longform">
+                                <span class="slds-text-body_small" >
+                                    Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse interdum vehicula sapien, luctus pharetra quam lacinia eu. Sed eu dictum justo. Suspendisse a porttitor felis, ut vestibulum tellus. Praesent mattis ligula id elit malesuada, sit amet iaculis turpis auctor. Integer pellentesque ex arcu. Nulla sapien justo, commodo ut condimentum in, consectetur eget turpis. Nullam sapien velit, egestas eu ex et, dictum gravida dolor. In consequat ex sed risus pretium accumsan. Aenean non dictum lectus, in varius dolor. Sed ac orci semper, tincidunt ipsum sit amet, tristique arcu. Proin erat tellus, bibendum at nulla quis, malesuada rhoncus ex. Nam congue dui turpis, sit amet tincidunt ex ullamcorper sit amet. Fusce lobortis, leo varius vehicula commodo, velit diam aliquam enim, quis rhoncus arcu turpis nec lacus.
+
+                                    In tincidunt bibendum fermentum. Curabitur ornare ipsum eros, varius egestas tellus bibendum non. Suspendisse potenti. Nullam aliquam faucibus tempor. Aliquam erat volutpat. Aliquam et placerat ex. Nunc gravida, nisi fermentum pharetra feugiat, urna lacus lacinia lorem, et pharetra nulla quam at arcu. Duis gravida vehicula fringilla. Suspendisse potenti. Maecenas fringilla lorem aliquet orci commodo, vitae convallis urna tincidunt. Pellentesque ornare, purus id condimentum consectetur, magna tortor ultrices nunc, vel semper nunc augue vitae neque. Sed placerat enim eu varius molestie. Ut dignissim dignissim accumsan. In euismod blandit fermentum. Pellentesque consectetur arcu eget velit vulputate dictum. Phasellus elementum tempus iaculis.
+
+                                    Cras at sollicitudin lectus, sed accumsan purus. Curabitur euismod, ante quis dictum posuere, ligula risus ullamcorper risus, eget facilisis ipsum ipsum sit amet est. Nullam molestie, purus sit amet ullamcorper placerat, metus urna sodales velit, sit amet suscipit dolor est ac turpis. Sed erat nisi, aliquam placerat cursus in, facilisis at ex. Maecenas at magna nec ipsum pharetra viverra vel id nunc. Proin ac dignissim tellus. Morbi pretium tortor vel felis lobortis lobortis hendrerit sed libero. Suspendisse at est lacus.
+
+                                    Pellentesque non nisi at metus tincidunt porttitor ac vitae enim. Vestibulum congue lacinia risus, ut finibus magna interdum a. Maecenas tellus libero, vehicula a tristique id, finibus sed purus. Ut volutpat, massa eu maximus dictum, nisi magna ornare tortor, non sodales erat dui a lacus. Maecenas non augue quis lectus ultricies dapibus. Proin sit amet blandit ante, ut pulvinar velit. Ut egestas malesuada nibh ut consectetur. Suspendisse rhoncus viverra justo pulvinar mollis. Phasellus ultricies libero augue. Integer et tortor at quam aliquet semper. In laoreet metus placerat dui venenatis, nec tempor nulla posuere. Praesent vitae hendrerit diam.
+
+                                    Phasellus dignissim felis a erat semper elementum. Nullam tincidunt ipsum nec finibus dapibus. Curabitur semper tempus nunc. Curabitur tristique justo ut aliquam semper. Nunc congue pulvinar viverra. Vivamus nec neque in odio sollicitudin commodo id in ex. Pellentesque velit enim, vulputate in quam a, interdum tempus eros. Duis at finibus elit. Suspendisse accumsan orci sit amet condimentum varius. Duis id efficitur sem, vitae mollis metus. Etiam laoreet metus nulla, a volutpat urna commodo eget.
+
+                                </span>
+                        </div>
+                    </div>
+                </aura:if>
+
+
+            </lightning:layoutItem>
+        </lightning:layout-->
+
+        <!--<ui:button aura:id="submitButton" label="{!v.submitButtonLabel}" press="{!c.handleSelfRegister}" />-->
+        <center>
+            <!--aura:renderIf isTrue="{! or (v.haveAcessCode == false ,and (v.haveAcessCode ==true , and(v.disableshowAccess == true, v.selectedAccount.Id !=null)  ) ) }" >
+                <lightning:button aura:id="submitButton" type="submit" variant="brand" disabled="{!v.disableSubmitButton}" label="Send Verification Email"  onclick="{!c.handleSelfRegister}" />
+                <aura:set attribute="else" >
+                    <lightning:button aura:id="submitButton" type="submit" variant="brand" disabled="true" label="Send Verification Email"  onclick="{!c.handleSelfRegister}" />
+
+                </aura:set>
+
+            </aura:renderIf-->
+
+            <aura:renderIf isTrue="{! and (v.disableshowAccess == true , v.haveAcessCode == true)}" >
+                <lightning:button aura:id="submitButton" type="submit" variant="brand"   label="Send Verification Email"  onclick="{!c.handleSelfRegister}" />
+
+            </aura:renderIf>
+            <aura:renderIf isTrue="{! v.haveAcessCode == false}" >
+                <lightning:button aura:id="submitButton" type="submit" variant="brand" disabled="{!v.disableSubmitButton}"  label="Send Verification Email"  onclick="{!c.handleSelfRegister}" />
+
+            </aura:renderIf>
+            <aura:renderIf isTrue="{! and (v.disableshowAccess == false , v.haveAcessCode == true)}" >
+                <lightning:button aura:id="submitButton" type="submit" variant="brand" disabled="true"  label="Send Verification Email"  onclick="{!c.handleSelfRegister}" />
+
+            </aura:renderIf>
+
+        </center>
+    </div>
+
+    <div class="slds-p-top--x-large"/>
+    <lightning:spinner aura:id="validateSpinner" variant="brand" size="medium" class="{!v.validateSpinnerClass}"/>
+    <aura:renderIf  isTrue="{! v.logoutSource != ''}">
+        <iframe class="slds-hide" aura:id="iframeLogout" name="iframeLogout" style="width: 50%; height: 50%;" src="{!v.logoutSource}"/>
+    </aura:renderIf>
+
+</aura:component>
