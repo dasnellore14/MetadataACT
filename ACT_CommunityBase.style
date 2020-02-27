@@ -1,0 +1,58 @@
+/**
+ * Created by adamsm on 2/1/2019.
+ */
+ .THIS .CB_RequiredField:before {
+     color: rgb(194, 57, 52);
+     content: "*";
+     margin: 0 0.125rem 0 0.125rem;
+     float: left;
+     font-weight: 400;
+ }
+
+ /* Check Boxes */
+.THIS .CB_checkBoxLabelLeft {
+    display: inline-block;
+    float: left;
+}
+
+/* Button Styles */
+.THIS .CB_largeButton {
+    border-radius: 0px;
+    font-size: 16px;
+    padding-bottom: 10px;
+    padding-left: 30px;
+    padding-right: 30px;
+    padding-top: 10px;
+}
+
+/* Used for a gray box that goes around a section */
+.THIS .CB_shadowBox {
+    background-color: rgba(242, 244, 247, 1);
+    padding: 20px;
+}
+
+/* Used for a orange box that goes around a section */
+.THIS .CB_orangeBox {
+    background-color: rgba(254, 248, 220, 1);
+    padding: 20px;
+}
+
+/* Headers/Titles */
+.THIS .CB_blueText {
+    color: #0077AA;
+}
+
+.THIS .CB_headerLevel1 {
+    font-size: 30px;
+    font-weight: bold;
+}
+
+.THIS .CB_headerLevel2 {
+    font-size: 24px;
+    font-weight: bold;
+}
+
+.THIS .CB_headerLevel3 {
+    font-size: 18px;
+    font-weight: bold;
+}
