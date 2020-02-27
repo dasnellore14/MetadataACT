@@ -1,0 +1,401 @@
+/**
+* Created by Rama on 2019-06-13.
+*/
+
+public without sharing class ACT_ManageMyAccessController {
+    private static set<string> setEmetricRoles = new set<string>{
+            'Admin-Full', 'Normal-Full', 'Normal-Limited'
+    };
+
+    /**
+    * Method to access levels for respective account for logged in user.
+    *
+    *
+    * @strAccount Hold's account information.
+    * @return access levels.
+    */
+    @AuraEnabled
+    public static string fetchMyOrganizationAccess(String strAccount) {
+        Account objAccount = new Account();
+        AccountContactRelation objACR = new AccountContactRelation();
+        list<AccountContactRelation> lstACR = new list<AccountContactRelation> ();
+        map<string, String> mapReturn = new map<string, String>();
+
+        if (String.isNotBlank(strAccount)) {
+            objAccount = (Account) JSON.deserialize(strAccount, Account.class);
+
+            lstACR = [
+                    SELECT Ed_Fi_Role__c,eMetrics_Role__c,Success_Community_Role__c,Account.eMetric_Org_Type__c,TAA_Role__c,PANext_Role__c
+                    FROM AccountContactRelation
+                    WHERE IsActive = true AND AccountId = :objAccount.Id AND Contact.User__c = :userinfo.getUserId()
+            ];
+
+            for (AccountContactRelation thisACR : lstACR) {
+                // Check for Ed-Fi, having any value allows the SAO_Ed_Fi_Admin permission set
+                if (thisACR.Ed_Fi_Role__c != null) {
+                    mapReturn.put('SAO_Ed_Fi_Admin', 'true');
+                }
+
+                // Check for TAA role.
+                if (thisACR.TAA_Role__c != null) {
+                    mapReturn.put('SAO_TAA', 'true');
+                }
+
+                // Check for a trusted agent
+                if (thisACR.Success_Community_Role__c == 'Trusted Agent' && thisACR.Account.eMetric_Org_Type__c != 'S') {
+                    mapReturn.put('SAO_Trusted_Agent', 'true');
+                    if(thisACR.Account.eMetric_Org_Type__c!='' ||thisACR.Account.eMetric_Org_Type__c!=null){
+                        mapReturn.put('eMetric_Org_Type__c', thisACR.Account.eMetric_Org_Type__c);
+                    }
+                }
+
+                // Check for a state trusted agent
+                if (thisACR.Success_Community_Role__c == 'State Trusted Agent' && thisACR.Account.eMetric_Org_Type__c == 'S') {
+                    mapReturn.put('SAO_Trusted_Agent', 'true');
+                    if(thisACR.Account.eMetric_Org_Type__c!='' ||thisACR.Account.eMetric_Org_Type__c!=null){
+                        mapReturn.put('eMetric_Org_Type__c', thisACR.Account.eMetric_Org_Type__c);
+                    }
+                }
+
+                // Check for a test coordinator
+                if(string.isNotEmpty(thisACR.PANext_Role__c)){
+                    List<String> PANextRoles = thisACR.PANext_Role__c.split(';');
+                    if (PANextRoles.contains('Test Coordinator')) {
+                        mapReturn.put('SAO_Test_Coordinator', 'true');
+                    }
+                }
+
+
+
+
+                if (String.isNotBlank(thisACR.eMetrics_Role__c) && setEmetricRoles.contains(thisACR.eMetrics_Role__c)) {
+                    mapReturn.put('eMetrics_Role__c', thisACR.eMetrics_Role__c);
+                }
+            }
+
+            if (!mapReturn.isEmpty()) {
+                JSONGenerator objJSON = JSON.createGenerator(true);
+                objJSON.writeStartObject();
+
+                if (mapReturn.containsKey('SAO_Ed_Fi_Admin')) {
+                    objJSON.writeBooleanField('SAO_Ed_Fi_Admin', Boolean.valueOf(mapReturn.get('SAO_Ed_Fi_Admin')));
+                }
+
+                if (mapReturn.containsKey('eMetrics_Role__c')) {
+                    objJSON.writeStringField('eMetrics_Role__c', mapReturn.get('eMetrics_Role__c'));
+                }
+
+                if (mapReturn.containsKey('SAO_Trusted_Agent')) {
+                    objJSON.writeBooleanField('SAO_Trusted_Agent', Boolean.valueOf(mapReturn.get('SAO_Trusted_Agent')));
+                    if(mapReturn.get('eMetric_Org_Type__c') == null){
+                        objJSON.writeStringField('eMetric_Org_Type__c', '');
+                    }else{
+                        objJSON.writeStringField('eMetric_Org_Type__c', mapReturn.get('eMetric_Org_Type__c'));
+                    }
+                }
+
+                if (mapReturn.containsKey('eMetric_Org_Type__c') && mapReturn.containsKey('SAO_Trusted_Agent')) {
+                    objJSON.writeBooleanField('SAO_Trusted_Agent', Boolean.valueOf(mapReturn.get('SAO_Trusted_Agent')));
+                    objJSON.writeStringField('eMetric_Org_Type__c', mapReturn.get('eMetric_Org_Type__c'));
+                }
+
+                if (mapReturn.containsKey('SAO_TAA')) {
+                    objJSON.writeBooleanField('SAO_TAA', Boolean.valueOf(mapReturn.get('SAO_TAA')));
+                }
+
+                if (mapReturn.containsKey('SAO_Test_Coordinator')) {
+                    objJSON.writeBooleanField('SAO_Test_Coordinator', Boolean.valueOf(mapReturn.get('SAO_Test_Coordinator')));
+                }
+
+                objJSON.writeEndObject();
+                return objJSON.getAsString();
+            }
+        }
+
+        if (!lstACR.isEmpty()) {
+            return 'ACR Exists';
+        }
+
+        return null;
+    }
+
+    /**
+    * Method to validate access code.
+    *
+    * @accessCode Hold's access code.
+    * @accountId Hold's account id.
+    * @return validation status.
+    */
+    @AuraEnabled
+    public static string validateAccesCodeAndAccount(string accessCode, string accountId) {
+        return ACT_IDP_RequestAccessController.validateAcessCode(accessCode, accountId);
+    }
+
+    /**
+    * Method to apply requested access in use an access code functionality.
+    *
+    * @strAccessInfo Hold's requested access details.
+    * @return Request status.  Success = Processed ok.  Duplicate = Already have this access.
+    */
+    @AuraEnabled
+    public static string applyRequestedPermissions(String strAccessInfo) {
+        try {
+            Map<String, String> mapAccessInfo = (Map<String, String>) JSON.deserialize(strAccessInfo, Map<String, String>.class);
+
+            Id thisContactId = ACT_CommunityBaseController.CurrentUserContactId();
+            String strAccountId;
+            String strAccessToken;
+
+            if (mapAccessInfo.containsKey('accountId')) {
+                strAccountId = mapAccessInfo.get('accountId');
+            }
+
+            if (mapAccessInfo.containsKey('accessToken')) {
+                strAccessToken = mapAccessInfo.get('accessToken');
+            }
+
+            // Process the access code
+            ACT_GEN_HierarchyFunctions.ACRMVP objMVP = ACT_GEN_HierarchyFunctionsWithoutSharing.ProcessAccessCode(strAccountId, strAccessToken, UserInfo.getUserId());
+
+            // Process the ACR on a success
+            if (objMVP.Status == 'Success') {
+                // Create the ACR and related info
+                set<Id> setContacts = new set<Id>{
+                        thisContactId
+                };
+
+                ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(strAccountId, setContacts, objMVP.SuccessCommunityRole, objMVP.eMetricsRole, objMVP.EdFiRole, objMVP.TAARole, thisContactId, 'Access', null, objMVP.AuditChangeTypeId, 'Existing User Using Access Code');
+                List<Id> lstContacts = new List<Id>{
+                        thisContactId
+                };
+                sendEmailWhenUsingAccessCodeForSTA(lstContacts,strAccountId);
+            }
+            else if (objMVP.Status == 'Invalid') {
+                Id caseRecordTypeId = Schema.SObjectType.Case.getRecordTypeInfosByName().get('Customer Service').getRecordTypeId();
+                String queueId = [select Id from Group where Type = 'Queue' AND NAME = 'HS Reporting'].id;
+                user userRecord = [select id,contactId from user where id=:userinfo.getUserId()];
+
+                String currUserName = UserInfo.getUserName();
+                string subject = 'Request Access for ' + currUserName;
+                Case newCase = ACT_AccessUtility.createCase(caseRecordTypeId, queueId, 'New', 'Web', subject, userRecord.contactid, null);
+
+                insert newCase;
+
+                // Update status so no error is generated
+                objMVP.Status = 'Success';
+
+            }
+            return objMVP.Status;
+        }
+        catch (exception objException) {
+            CC_SC_ERR_EventLogger.LogSingleError(objException, null, 'Error', null, 'ACT_ManageMyAccessController.applyRequestedPermissions', objException.getMessage(), '', '', '');
+
+            // Throw the error
+            throw new CC_SC_GEN_Exception(objException.getMessage());
+        }
+    }
+
+    /**
+    * Method to apply requested access in Request More access functionality.
+    *
+    * @strAccessInfo Hold's requested acess details.
+    * @return Request status.
+    */
+    @AuraEnabled
+    public static Boolean handleRequestedAccess(String strRequestedAccess) {
+
+        //Local vaiables.
+        String eMetricsRole;
+        List<String> lstRequestedRoles = new List<String>();
+        List<Access__c> lstAccessRecordsToUpdate = new List<Access__c>();
+
+        try {
+            // Deserialize the parameter object from the lightning component
+            ACT_ManageUsersController.AddAccessRequest objRequest = (ACT_ManageUsersController.AddAccessRequest) JSON.deserialize(strRequestedAccess, ACT_ManageUsersController.AddAccessRequest.class);
+
+            //Process the EDFI and TAA access requests.
+            Id devRecordTypeId = Schema.SObjectType.Access__c.getRecordTypeInfosByName().get('Request Record Type').getRecordTypeId();
+
+            // Get the current user
+            Id currContactId = UserInfo.getUserId();
+            User userRecord = [select id,contactId,contact.accountid,accountid, contact.Email, app_access_granted__c from user where id = :currContactId];
+
+            if (String.isNotBlank(objRequest.AccessLevel)) {
+                Access__c access = ACT_AccessUtility.createAccess(null, userRecord.contactid, objRequest.AccountId, 'Open', 'Request', null);
+                access.recordTypeId = devRecordTypeId;
+
+                switch on objRequest.AccessLevel {
+                    when 'Trusted Agent' {
+                        access.eMetrics_Role__c = 'Admin-Full';
+
+                        // Determine the requested role based on the account eMetric Org Type
+                        Account thisA =
+                        [
+                                SELECT
+                                        eMetric_Org_Type__c
+                                FROM
+                                        Account
+                                WHERE
+                                Id =: objRequest.AccountId
+                        ];
+
+                        if (thisA.eMetric_Org_Type__c == 'S') {
+                            access.Requested_Roles__c = 'State Trusted Agent';
+                        }
+                        else {
+                            access.Ed_Fi_Role__c = 'EDFI_TENANT_ADMIN';
+                            access.Requested_Roles__c = 'Trusted Agent';
+                            access.TAA_Role__c = 'ACCTAC';
+                        }
+
+                        lstAccessRecordsToUpdate.add(access);
+                    }
+
+                    when 'Summary Viewer' {
+                        access.eMetrics_Role__c = 'Normal-Limited';
+                        access.Requested_Roles__c = 'Online Reporting: Summary Viewer';
+                        lstAccessRecordsToUpdate.add(access);
+                    }
+
+                    when 'Detail Viewer' {
+                        access.eMetrics_Role__c = 'Normal-Full';
+                        access.Requested_Roles__c = 'Online Reporting: Detail Viewer';
+                        lstAccessRecordsToUpdate.add(access);
+                    }
+                }
+            }
+
+            // Create EdFi/TAA access for non-trusted agents
+            if (String.isBlank(objRequest.AccessLevel) || objRequest.AccessLevel != 'Trusted Agent') {
+                if (Boolean.valueOf(objRequest.TAALevel)) {
+                    Access__c access = ACT_AccessUtility.createAccess(null, userRecord.contactid, objRequest.AccountId, 'Open', 'Request', null);
+                    access.recordTypeId = devRecordTypeId;
+                    access.TAA_Role__c = 'ACCTAC';
+                    access.Requested_Roles__c = 'TAA Coordinator';
+                    lstAccessRecordsToUpdate.add(access);
+                }
+                if (Boolean.valueOf(objRequest.EdFiAccess)) {
+                    Access__c access = ACT_AccessUtility.createAccess(null, userRecord.contactid, objRequest.AccountId, 'Open', 'Request', null);
+                    access.Ed_Fi_Role__c = 'EDFI_TENANT_ADMIN';
+                    access.recordTypeId = devRecordTypeId;
+                    access.Requested_Roles__c = 'Ed-Fi Tenant Admin';
+                    lstAccessRecordsToUpdate.add(access);
+                }
+            }
+
+            if (!lstAccessRecordsToUpdate.isEmpty()) {
+                insert lstAccessRecordsToUpdate;
+
+                //Trigger Email notification.
+                ACT_IDP_RequestAccessController.sendEmailNotification(objRequest.AccountId);
+
+            }
+        }
+        catch (exception objException) {
+            CC_SC_ERR_EventLogger.LogSingleError(objException, null, 'Error', null, 'ACT_ManageMyAccessController.handleRequestedAccess', objException.getMessage(), '', '', '');
+            // Throw the error
+            AuraHandledException objAuraException = new AuraHandledException(objException.getMessage());
+            throw objAuraException;
+        }
+
+        //reset community page
+        return true;
+    }
+    /*
+     * Method to initialise My-Access Section
+     */
+    @AuraEnabled
+    public static PageInitialize intitializePage(){
+        PageInitialize pi = new PageInitialize();
+
+        // Check if add access is enabled
+        ACT_Success_Toggles__c toggleSettings = ACT_Success_Toggles__c.getOrgDefaults();
+
+        pi.enableEdFi = (toggleSettings != null && toggleSettings.Enable_Ed_Fi__c) ? true : false;
+        pi.viewAccessLevelsURL = ACT_CommunityBaseController.CommunityBaseURL() + '/s/article/Summary-of-Online-Reporting-Access-Levels';
+        pi.enableTAA = (toggleSettings != null && toggleSettings.Enable_TAA__c) ? true : false;
+        return pi;
+    }
+
+    @AuraEnabled
+    public static void sendEmailWhenUsingAccessCodeForSTA(List<Id> contactList,string selectedAcc) {
+        list<string> toAddresses = new list<string>();
+
+        map<string,string> toaddressesMap = new map<string,string>();
+
+        if(contactList.size()>0)
+        {
+            for(user u:[select id,email,firstname from user where contactId IN :contactList and isactive = true])
+            {
+                toAddresses.add(u.email);
+                toaddressesMap.put(u.email,u.firstname);
+            }
+        }
+        system.debug('toAddresses--------'+toAddresses);
+
+
+        // Get the base URL.
+        String sfdcBaseURL = URL.getSalesforceBaseUrl().toExternalForm();
+        sfdcBaseURL = sfdcBaseURL + '/s/login/?startURL=%2Fs%2Fmanage-users%3Fview%3Dopenrequests';
+        System.debug('Base URL: ' + sfdcBaseURL);
+
+        List<Messaging.SingleEmailMessage> emailList = new List<Messaging.SingleEmailMessage>();
+        string contactId = [select id, contactId from user where id = :userinfo.getUserId()].contactId;
+        String accountId = selectedAcc;
+        try {
+
+            if(toAddresses.size()>0) {
+                List<Messaging.SingleEmailMessage> msgListToBeSent = new List<Messaging.SingleEmailMessage>();
+                EmailTemplate template = [Select id, HtmlValue,Body from EmailTemplate where developername = 'State_or_School_Trusted_Agent_approved'];
+                for(string emailString:toAddresses) {
+                    Messaging.SingleEmailMessage email = new Messaging.SingleEmailMessage();
+                    list<string> finalToEmailList = new list<string>();
+                    finalToEmailList.add(emailString);
+                    email = Messaging.renderStoredEmailTemplate(template.Id, contactId, accountId);
+                    // Now re-process the mail, fixing the user link
+
+                    Messaging.SingleEmailMessage emailToSend = new Messaging.SingleEmailMessage();
+                    emailToSend.setToAddresses(finalToEmailList);
+                    //string fullLink;
+                    string fullLink = ACT_CommunityBaseController.CommunityBaseURL() + '/s/?startURL=%2Fs%2Fmanage-users%3Fview%3Dopenrequests';
+                    system.debug('fullLink--------' + fullLink);
+                    Account acc = [select id,Name from account where id = :accountid];
+                    //emailToSend.setPlainTextBody(email.getPlainTextBody().replace('{{$$$Text_to_replace}}', fullLink));
+
+                    emailToSend.setHTMLBody(email.getHTMLBody().replace('{{$$$Text_to_replace}}', fullLink));
+
+                    emailToSend.setHTMLBody(emailToSend.getHTMLBody().replace('{{$$$Account_to_replace}}', acc.Name));
+                    if(toaddressesMap.containsKey(emailString))
+                    {
+                        emailToSend.setHTMLBody(emailToSend.getHTMLBody().replace('{{$$$FirstName_to_replace}}', toaddressesMap.get(emailString)));
+                    }
+                    emailToSend.setSubject(email.getSubject());
+                    msgListToBeSent.add(emailToSend);
+
+                }
+                // Do a final send of the email, using Percy
+                ACT_GEN_EmailFunctions objPercy = new ACT_GEN_EmailFunctions();
+
+                objPercy.callingFunction = 'ACT_ManageMyAccessController.sendEmailNotification';
+                objPercy.emailToProcess = ACT_GEN_EmailFunctionsIterator.convertMessages(msgListToBeSent);
+
+                Database.executeBatch(objPercy, 10);
+
+            }
+        }
+        catch (Exception e) {
+            CC_SC_ERR_EventLogger.LogSingleError(e, null, 'Error', null, 'Send Email Notification Request Access Error', e.getMessage(), '', '', '');
+            AuraHandledException ex = new AuraHandledException(e.getMessage());
+            throw ex;
+        }
+    }
+
+    public class PageInitialize {
+        @AuraEnabled
+        public Boolean enableEdFi {get; set;}
+        @AuraEnabled
+        public String viewAccessLevelsURL {get; set;}
+        @AuraEnabled
+        public Boolean enableTAA {get; set;}
+    }
+}
