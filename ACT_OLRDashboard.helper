@@ -1,0 +1,42 @@
+/**
+ * Created by yalamatp on 8/21/2019.
+ */
+({
+    getApprovalData : function(component, event, helper) {
+        var action = component.get("c.getHierarchyApprovalsData");
+
+        action.setCallback(this, function(response) {
+            var objReturn = response.getReturnValue();
+            var state = response.getState();
+
+            if (state ==="SUCCESS") {
+                if(objReturn.length >=1) {
+                    component.set("v.showModalDialog", true);
+                    component.set("v.HierarchyApprovalsList", objReturn);
+                }
+            }
+        });
+
+        // Launch the server side calls
+        $A.enqueueAction(action);
+    },
+
+    spinnerHide: function(component) {
+        console.log('spinnerHide');
+        // Get spinner
+        var spinner = component.find("idSpinner");
+        console.log('spinnerHide='+spinner);
+
+        // Hide the spinner
+        $A.util.addClass(spinner, "slds-hide");
+        console.log('spinnerHide');
+    },
+
+    spinnerShow: function(component) {
+        // Get spinner
+        var spinner = component.find("idSpinner");
+
+        // Show the spinner
+        $A.util.removeClass(spinner, "slds-hide");
+    },
+})
