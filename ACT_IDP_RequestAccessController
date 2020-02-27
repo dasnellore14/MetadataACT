@@ -1,0 +1,547 @@
+/**
+ * Created by mitulpatel on 10/9/18.
+ */
+public without sharing class ACT_IDP_RequestAccessController {
+    // This function checks to see if the current user has any hierarchies that they need to approve
+    @AuraEnabled
+    public static boolean checkHierarchyToApprove() {
+        return ACT_GEN_HierarchyFunctions.getHierarchyApprovalNeededForUser(UserInfo.getUserId());
+    }
+
+    @AuraEnabled
+    public static String handleRequestAccess(String accountId, String accessToken, List<String> selectedRoles, String accessLevel ,string accessCodeId, Integer accessCodeUsage  ,string validateResponse ,string eMetricsRole) {
+
+        System.debug('>>> ACT_IDP_RequestAccessController started. Parameters: ' + accountId +
+                ', ' + accessToken +
+                ',' + selectedRoles.size() +
+                ', ' + accessLevel +
+                ',  eMetricsRole : '+eMetricsRole);
+
+        try{
+
+            if(validateResponse == 'Valid')
+            {
+                string validResponse = validateAcessCode(accessToken,accountId);
+                if(validResponse.startsWith('Invalid'))
+                {
+                    throw new CC_SC_GEN_Exception('Invalid Access Code');
+                }
+            }
+
+            // Get the current user
+            Id currContactId = UserInfo.getUserId();
+            User userRecord = [select id,contactId,contact.accountid,accountid, contact.Email,  app_access_granted__c  from user where id =:currContactId];
+
+            if(accessLevel == 'Trusted Agent' && accessCodeUsage >0 && accessCodeId !=null && validateResponse == 'valid')
+            {
+                // This path is for existing users that used a valid access code
+                list<Access_Code__c> accessCodes = new list<Access_Code__c>([select id,Access_Code__c ,Uses_Remaining__c,District_Account__c,Type__c  from Access_Code__c where id  =:accessCodeId ]);
+
+                if(accessCodes.size()>0) {
+                    // Check if this user already has this access
+                    string strACRQuery = 'SELECT Id FROM AccountContactRelation WHERE IsActive = true And Status__c = \'Active\' And AccountId = \'' + accountId + '\' And ContactId = \'' + userRecord.contactid + '\' ';
+
+                    switch on accessCodes[0].Type__c {
+                        when 'Ed-Fi Admin' {
+                            strACRQuery += 'And Ed_Fi_Role__c = \'EDFI_TENANT_ADMIN\' ';
+                        }
+
+                        when 'State Online Reporting' {
+                            strACRQuery += 'And Success_Community_Role__c != null';
+                        }
+
+                        when 'Trusted Agent' {
+                            strACRQuery += 'And Success_Community_Role__c = \'Trusted Agent\'';
+                        }
+                    }
+
+                    list<AccountContactRelation> lstDupCheck = new list<AccountContactRelation>();
+                    if( userRecord.contactid !=null)
+                        lstDupCheck   = Database.query(strACRQuery);
+
+                    if (lstDupCheck != null && lstDupCheck.size() > 0) {
+                        throw new CC_SC_GEN_Exception('You already have the access that this code grants.');
+                    }
+
+                    // Decrement the uses remaining
+                    accessCodes[0].Uses_Remaining__c = accessCodes[0].Uses_Remaining__c - 1;
+                    update accessCodes[0];
+
+                    //create Access Record
+                    Id devRecordTypeId = Schema.SObjectType.Access__c.getRecordTypeInfosByName().get('Active').getRecordTypeId();
+
+                    Access__c access = ACT_AccessUtility.createAccess(accessCodeId,userRecord.contactid,accountId,'Approved','Access code',null);
+                    access.recordTypeId = devRecordTypeId;
+                    access.eMetrics_Role__c = eMetricsRole;
+                    insert access;
+
+                    //update the account information on the contact
+                    contact con = new contact();
+                    con.id = userRecord.contactid;
+                    con.accountid = accountId;
+                    con.user__c = currContactId;
+                    if( userRecord.contactid !=null)
+                        update con;
+
+                    // Grant Access on the user record
+                    userRecord.App_Access_Granted__c = true;
+                    update userRecord;
+                    string accessType=accessCodes[0].Type__c;
+
+                    // Format the access type
+                    accessType = String.isEmpty(accessType) ? '' : accessType;
+
+                    //create approval Hierarchy record
+                    if(accessType=='Trusted Agent') {
+                        Account acc = [select id,Current_Year_Hierarchy__c,One_Year_Previous_Hierarchy__c,Two_Years_Previous_Hierarchy__c, eMetric_Org_Type__c from Account where id = :accountId limit 1];
+                        boolean updateAccount = false;
+                        if (acc.eMetric_Org_Type__c != 'B') {
+
+                            Date oneYearDate = date.today().addDays(-365);
+                            Date SecondYearDate = date.today().addDays(-730);
+                            Date todayDate = date.today();
+
+                            string firstPrevYearContractId;
+                            string secondPrevYearContractId;
+
+                            list<Contract_Administration_Participant__c> FirstPreviousYearContractList = new list<Contract_Administration_Participant__c>([
+                                    select id,Account_ID__c,Parent_Account__c,Org_Type__c,Contract_Administration_ID__c,
+                                            Contract_Administration_ID__r.Contract_Code__c, Contract_Administration_ID__r.Contract_ID__c,
+                                            Contract_Administration_ID__r.Program__c,Contract_Administration_ID__r.Contract_ID__r.StartDate, Contract_Administration_ID__r.Contract_ID__r.EndDate,
+                                            Contract_Administration_ID__r.Contract_ID__r.program__c
+                                    from Contract_Administration_Participant__c  where
+                                    Contract_Administration_ID__r.Contract_ID__r.Program__c = 'National' and
+                                    eMetric_Org_Type__c  != 'B' and
+                                    Account_ID__c = :acc.id AND
+                                    (
+                                            (Contract_Administration_ID__r.Contract_ID__r.startDate  <= last_n_days:365 and Contract_Administration_ID__r.Contract_ID__r.endDate  >= last_n_days:365)
+                                            or
+                                            (Contract_Administration_ID__r.Contract_ID__r.startDate  <= last_n_days:730 and Contract_Administration_ID__r.Contract_ID__r.endDate  >= last_n_days:730)
+                                    )
+
+
+
+                            ]);
+
+                            for(Contract_Administration_Participant__c contractRecord :FirstPreviousYearContractList)
+                            {
+                                if(contractRecord.Contract_Administration_ID__r.Contract_ID__r.startDate  <= oneYearDate  &&  oneYearDate <= contractRecord.Contract_Administration_ID__r.Contract_ID__r.EndDate)
+                                {
+                                    firstPrevYearContractId = contractRecord.Contract_Administration_ID__r.Contract_ID__c ;
+                                }
+                                if(contractRecord.Contract_Administration_ID__r.Contract_ID__r.startDate  <= SecondYearDate  &&  SecondYearDate <=contractRecord.Contract_Administration_ID__r.Contract_ID__r.EndDate )
+                                {
+                                    secondPrevYearContractId = contractRecord.Contract_Administration_ID__r.Contract_ID__c ;
+                                }
+                            }
+
+
+                            system.debug('firstPrevYearContractId-------'+firstPrevYearContractId);
+                            system.debug('secondPrevYearContractId-------'+secondPrevYearContractId);
+
+
+                            list<Hierarchy_Approval__c> hierarchyApprovalsList = new list<Hierarchy_Approval__c>([select id,District_Account__c,status__c,Contract__c from Hierarchy_Approval__c where District_Account__c = :accountId]);
+                            map<string,Hierarchy_Approval__c> hierarchyApprovalsMap = new map<string,Hierarchy_Approval__c>();
+                            if(hierarchyApprovalsList.size()>0)
+                            {
+                                for(Hierarchy_Approval__c approvalRecord: hierarchyApprovalsList)
+                                {
+
+                                    hierarchyApprovalsMap.put(approvalRecord.Contract__c,approvalRecord);
+                                }
+                            }
+                            system.debug('hierarchyApprovalsMap-----'+hierarchyApprovalsMap);
+                            if (hierarchyApprovalsList.size() == 0) {
+                                Hierarchy_Approval__c Hierarchyapproval = new Hierarchy_Approval__c();
+                                Hierarchyapproval.District_Account__c = acc.id;
+                                Hierarchyapproval.status__c = 'Approval Required';
+                                list<contract> contractList = new list<Contract>([select id from contract where startdate <=:todayDate and enddate >=:todaydate /*and AccountId =:acc.id and account.eMetric_Org_Type__c != 'B' */ and Program__c = 'National' ]);
+                                if(contractList.size()>0)
+                                    Hierarchyapproval.Contract__c = contractList[0].id;
+                                insert Hierarchyapproval;
+
+                                acc.Current_Year_Hierarchy__c = Hierarchyapproval.id;
+                                updateAccount = true;
+                            }
+
+                            if(firstPrevYearContractId !=null  && ! hierarchyApprovalsMap.containsKey(firstPrevYearContractId))
+                            {
+                                Hierarchy_Approval__c FirstYearHierarchyapproval = new Hierarchy_Approval__c();
+                                FirstYearHierarchyapproval.District_Account__c = acc.id;
+                                FirstYearHierarchyapproval.status__c = 'Approval Required';
+                                FirstYearHierarchyapproval.Contract__c = firstPrevYearContractId;
+                                insert FirstYearHierarchyapproval;
+
+                                acc.One_Year_Previous_Hierarchy__c = FirstYearHierarchyapproval.id;
+                                updateAccount = true;
+                            }
+                            if(secondPrevYearContractId !=null && ! hierarchyApprovalsMap.containsKey(secondPrevYearContractId))
+                            {
+                                Hierarchy_Approval__c SecondYearHierarchyapproval = new Hierarchy_Approval__c();
+                                SecondYearHierarchyapproval.District_Account__c = acc.id;
+                                SecondYearHierarchyapproval.status__c = 'Approval Required';
+                                SecondYearHierarchyapproval.Contract__c = secondPrevYearContractId;
+                                insert SecondYearHierarchyapproval;
+
+                                acc.Two_Years_Previous_Hierarchy__c = SecondYearHierarchyapproval.id;
+                                updateAccount = true;
+                            }
+                            system.debug('updateAccount---------'+updateAccount);
+
+                            if(updateAccount)
+                                update acc;
+
+
+                        }
+                    }
+
+                    // update AccountContactRelation record
+                    string strEdFiRole;
+                    string strSuccessCommunityRole;
+
+                    switch on accessType {
+                        when 'Ed-Fi Admin' {
+                            strEdFiRole = 'EDFI_TENANT_ADMIN';
+                            strSuccessCommunityRole = null;
+                            eMetricsRole = null;
+                        }
+
+                        when 'State Online Reporting' {
+                            strSuccessCommunityRole = null;
+                            eMetricsRole = 'Normal-Full';
+                        }
+
+                        when 'Trusted Agent' {
+                            strSuccessCommunityRole = 'Trusted Agent';
+                        }
+                    }
+
+                    // Call AccountContactRelation shared functionality
+                    // Note this will create ACRs, Permission Sets and child ACRs, as required
+                    ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(accountId, new set<id>{userRecord.contactid}, strSuccessCommunityRole, eMetricsRole, strEdFiRole, null, UserRecord.ContactId, 'Access', null, access.Id, 'Existing User Using Access Code');
+
+                    // Create the access code use record
+                    Access_Code_Use__c  accessCodeUse =  ACT_AccessUtility.createAccessCodeUse(userRecord.contactid,accessCodes[0].id);
+
+                    insert accessCodeUse;
+                }
+            }
+            else if(accessLevel == 'Trusted Agent' && validateResponse == 'more')
+            {
+                // This path is for trusted agents trying to use an access code with no uses left
+                // Note, it should probably be creating a case, but for now it is just doing nothing
+                // to accommodate SF-4704
+                list<user> oldestTrustedAgent = new list<user>();
+                list<access__c> accList = new list<access__c>([select id,ownerid,Community_Contact__c from access__c where Account__c =:accountId  order by createddate  asc  limit 1  ]);
+
+                string caseOwnerString;
+                if(oldestTrustedAgent.size()>0) {
+                    caseOwnerString = oldestTrustedAgent[0].id;
+                }
+                else
+                {
+                    String queueId = [select Id from Group where Type = 'Queue' AND NAME = 'HS Reporting'].id;
+                    caseOwnerString = queueId;
+                }
+                system.debug('caseOwnerString--------'+caseOwnerString);
+
+                Id caseRecordTypeId = Schema.SObjectType.Case.getRecordTypeInfosByName().get('Customer Service').getRecordTypeId();
+
+                String queueId = [select Id from Group where Type = 'Queue' AND NAME = 'HS Reporting'].id;
+
+                String currUserName = UserInfo.getUserName();
+
+                string description = 'Access Request submitted by user ' + currUserName + ' with following values:'
+                        + '\n Account Id: ' + accountId
+                        + '\n Access Token: ' + accessToken
+                        + '\n Roles: ' + String.join(selectedRoles, ', ')
+                        + '\n Access Level: ' + accessLevel;
+                string subject = 'Request Access for ' + currUserName;
+                String newcontactId = [select id,contactid from user where id =:userinfo.getuserid()].contactId;
+                Case newCase = ACT_AccessUtility.createCase(caseRecordTypeId,caseOwnerString, 'New', 'Web', subject, newcontactId, description);
+
+                insert newCase;
+
+            }
+            else if(accessLevel == 'Trusted Agent' && validateResponse == 'Invalid') {
+                // This path is for trusted agents trying to process an invalid access code
+                // According to SF-4704, this should no longer create an access record
+                // Create a case, and assign it to the appropriate Queue
+                Id caseRecordTypeId = Schema.SObjectType.Case.getRecordTypeInfosByName().get('Customer Service').getRecordTypeId();
+                String queueId = [select Id from Group where Type = 'Queue' AND NAME = 'HS Reporting'].id;
+
+                String currUserName = UserInfo.getUserName();
+
+                string description = 'Access Request submitted by user ' + currUserName + ' with following values:'
+                        + '\n Account Id: ' + accountId
+                        + '\n Access Token: ' + accessToken
+                        + '\n Roles: ' + String.join(selectedRoles, ', ')
+                        + '\n Access Level: ' + accessLevel;
+                string subject = 'Request Access for ' + currUserName;
+
+                Case newCase = ACT_AccessUtility.createCase(caseRecordTypeId, queueId, 'New', 'Web', subject, userRecord.contactid, description);
+
+                insert newCase;
+                sendEmailNotification(accountId);
+
+            }
+            else if(accessLevel == 'Trusted Agent' && (validateResponse == ''  || validateResponse == null )  && (AccessToken == 'undefined' || AccessToken =='' || AccessToken == null ))
+            {
+
+                Id devRecordTypeId = Schema.SObjectType.Access__c.getRecordTypeInfosByName().get('Request Record Type').getRecordTypeId();
+
+                Access__c access = ACT_AccessUtility.createAccess(accessCodeId,userRecord.contactid,accountId,'Open','Request',null);
+                access.recordTypeId = devRecordTypeId;
+                access.eMetrics_Role__c = eMetricsRole;
+                if(eMetricsRole =='Admin-Full')
+                    access.Requested_Roles__c ='Trusted Agent';
+                else if (eMetricsRole =='Normal-Limited')
+                    access.Requested_Roles__c ='Online Reporting: Summary Viewer';
+                else if (eMetricsRole == 'Normal-Full')
+                    access.Requested_Roles__c ='Online Reporting: Detail Viewer';
+
+                insert access;
+
+                //Trigger Email notification.
+                sendEmailNotification(accountId);
+            }
+            else if((accessLevel == 'Summary Viewer' || accessLevel == 'Detail Viewer') && accountId != null) {
+                // This path is for requests for non-trusted agents
+                // First, look for open access grants for this user/org
+                list<Access__c> accList =
+                [
+                        SELECT
+                                Id,
+                                Account__r.eMetric_Org_Type__c,
+                                Community_Contact__c,
+                                eMetrics_Role__c,
+                                OwnerId,
+                                RecordTypeId,
+                                TAA_Role__c
+                        FROM
+                                Access__c
+                        WHERE
+                        Account__c =: accountId
+                        And Email_Address__c =: userRecord.contact.Email
+                        And Type__c = 'Grant'
+                        And Status__c ='Open'
+                ];
+
+                // If they exist, flag the access as accepted, and grant the access
+                // Otherwise, create a new access request
+                if (accList.size() > 0) {
+                    // Get the grant record type
+                    Id RTID = Schema.SObjectType.Access__c.getRecordTypeInfosByName().get('Grant Record Type').getRecordTypeId();
+
+                    for (Access__c thisA : accList) {
+                        thisA.RecordTypeId = RTID;
+                        thisA.Status__c = 'Accepted';
+
+                        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(accountId, new set<Id>{userRecord.ContactId}, ACT_CommunityBaseController.ConverteMetricsRoleToSuccessCommunityRole(thisA.eMetrics_Role__c, thisA.Account__r.eMetric_Org_Type__c), thisA.eMetrics_Role__c, null, thisA.TAA_Role__c, userRecord.ContactId, 'Access Grant', accList, null, 'User Accepted Access Grant');
+                    }
+
+                    update accList;
+                }
+                else {
+                    Access__c thisA = ACT_AccessUtility.createAccess(null, userRecord.contactid, accountId, 'Open', 'Request', null);
+
+                    // Set the record type and eMetricsRole role
+                    Id devRecordTypeId = Schema.SObjectType.Access__c.getRecordTypeInfosByName().get('Request Record Type').getRecordTypeId();
+
+                    thisA.eMetrics_Role__c = eMetricsRole;
+                    thisA.RecordTypeId = devRecordTypeId;
+                    if(eMetricsRole =='Admin-Full')
+                        thisA.Requested_Roles__c ='Trusted Agent';
+                    else if (eMetricsRole =='Normal-Limited')
+                        thisA.Requested_Roles__c ='Online Reporting: Summary Viewer';
+                    else if (eMetricsRole == 'Normal-Full')
+                        thisA.Requested_Roles__c ='Online Reporting: Detail Viewer';
+
+                    insert thisA;
+
+                    //Trigger Email notification.
+                    sendEmailNotification(accountId);
+                }
+            }
+
+
+        }
+        catch(Exception ex){
+            system.debug('Exception occurred >>>>> ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', 'Identity Community Request Access '
+                    + accountId,'Error in RequestAccessController for identity community', ex.getMessage(), '', '', '');
+            throw ex;
+        }
+        return 'Success';
+    }
+
+    public static Id getCaseRecordtypeId(){
+        String caseType = Label.ACT_IDP_CaseType;
+        Id caseId = null;
+        try{
+            List<RecordType> recordTypes = [Select Id from  RecordType
+            where sobjecttype='case' and developerName=:caseType];
+            if(recordTypes.size()>0){
+                caseId=recordTypes[0].Id;
+            }
+        }
+        catch(Exception ex){
+            system.debug('Exception occurred >>>>> ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', 'Identity Community Request Access Controller'
+                    + 'failed to get case record type id',
+                    'Error in RequestAccessController for identity community', ex.getMessage(), '', '', '');
+
+        }
+        return caseId;
+    }
+
+    @AuraEnabled
+    public static string  validateAcessCode(string accessCode, string accountId){
+
+        string response;
+        list<Access_Code__c> accessCodeList = new list<Access_Code__c>([select id,Access_Code__c ,Uses_Remaining__c,District_Account__c, Type__c  from Access_Code__c where Access_Code__c  =:accessCode and  District_Account__c =:accountId ]);
+        //(select id,name,Access_Code_Use_ID__c,AccessCODEACU__c from Access_Code_Use__r)
+        if(accessCodeList.size()>0)
+        {
+
+            //accessCodeList[0].Uses_Remaining__c = accessCodeList[0].Uses_Remaining__c - 1;
+            if(accessCodeList[0].Uses_Remaining__c  > 0 )
+            {
+                response = 'valid' +';'+accessCodeList[0].id+';'+ accessCodeList[0].Uses_Remaining__c+';'+ accessCodeList[0].Type__c;
+                // update accessCodeList;
+            }
+            else
+            {
+                response = 'more' +';'+accessCodeList[0].id;
+                //response ='more';
+            }
+
+        }
+        else
+        {
+            response ='Invalid';
+
+        }
+        return response;
+    }
+
+
+    @AuraEnabled
+    public static void sendEmailNotification(String AccountId) {
+
+        set<Id> acctSet = new set<id>();
+        set<id> accIdSet = new set<id>();
+        list<string> toAddresses = new list<string>();
+        set<String> contactList = new set<string>();
+        set<String> contactListSTA = new set<string>();
+        map<string,string> toaddressesMap = new map<string,string>();
+        EmailTemplate template = new EmailTemplate();
+
+        acctSet.add(AccountId);
+        Map<id,Id> accountidMap = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToParentIdMap(acctSet, new Set<String>{'D',null});
+
+        system.debug('accountidMap-------'+accountidMap);
+        for(Id key:accountidMap.keyset())
+        {
+            accIdSet.add(key);
+            accIdSet.add(accountidMap.get(key));
+        }
+
+        map<id, list<AccountContactRelation>> accConRelationList = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToUserMap(accIdSet,true,null);
+        system.debug('accConRelationList-------'+accConRelationList);
+        for(Id key:accConRelationList.keySet())
+        {
+            for(AccountContactRelation acctConRel :accConRelationList.get(Key))
+            {
+                if(acctConRel.Success_Community_Role__c == 'Trusted Agent')
+                {
+                    contactList.add(acctConRel.contactId);
+                }
+                if(acctConRel.Success_Community_Role__c == 'State Trusted Agent')
+                {
+                    contactListSTA.add(acctConRel.contactId);
+                }
+            }
+        }
+
+        system.debug('accConRelationList-------'+accConRelationList);
+        if(contactList.size()>0)
+        {
+            for(user u:[select id,email,firstname from user where contactId IN :contactList and isactive = true])
+            {
+                toAddresses.add(u.email);
+                toaddressesMap.put(u.email,u.firstname);
+            }
+        }
+        if(!contactListSTA.isEmpty())
+        {
+            for(user u:[select id,email,firstname from user where contactId IN :contactListSTA and isactive = true])
+            {
+                toAddresses.add(u.email);
+                toaddressesMap.put(u.email,u.firstname);
+            }
+        }
+        system.debug('toAddresses--------'+toAddresses);
+        system.debug('toAddressesMap-----'+toaddressesMap);
+
+
+        // Get the base URL.
+        String sfdcBaseURL = URL.getSalesforceBaseUrl().toExternalForm();
+        sfdcBaseURL = sfdcBaseURL + '/s/login/?startURL=%2Fs%2Fmanage-users%3Fview%3Dopenrequests';
+        System.debug('Base URL: ' + sfdcBaseURL);
+        System.debug('Account Id: ' + AccountId);
+
+        //https://ch-actinc.cs79.force.com/ACTSuccess/s/login/?startURL=%2Fs%2Frequest-access
+        List<Messaging.SingleEmailMessage> emailList = new List<Messaging.SingleEmailMessage>();
+        string contactId = [select id, contactId from user where id = :userinfo.getUserId()].contactId;
+        try {
+
+            if(toAddresses.size()>0) {
+                List<Messaging.SingleEmailMessage> msgListToBeSent = new List<Messaging.SingleEmailMessage>();
+                if(!contactListSTA.isEmpty()){
+                    template = [Select id, HtmlValue,Body from EmailTemplate where developername = 'State_Trusted_Agent_Needs_To_Approve'];
+                }
+                if(!contactList.isEmpty()) {
+                    template = [Select id, HtmlValue,Body from EmailTemplate where developername = 'Trusted_Agent_Needs_to_Approve'];
+                }
+                for(string emailString:toAddresses) {
+                    Messaging.SingleEmailMessage email = new Messaging.SingleEmailMessage();
+                    list<string> finalToEmailList = new list<string>();
+                    finalToEmailList.add(emailString);
+
+                    email = Messaging.renderStoredEmailTemplate(template.Id, contactId,AccountId);
+                    // Now re-process the mail, fixing the user link
+                    Messaging.SingleEmailMessage emailToSend = new Messaging.SingleEmailMessage();
+                    emailToSend.setToAddresses(finalToEmailList);
+                    //string fullLink;
+                    string fullLink = ACT_CommunityBaseController.CommunityBaseURL() + '/s/?startURL=%2Fs%2Fmanage-users%3Fview%3Dopenrequests';
+                    system.debug('fullLink--------' + fullLink);
+                    Account acc = [select id,Name from account where id = :accountid];
+                    emailToSend.setPlainTextBody(email.getPlainTextBody().replace('{{$$$Text_to_replace}}', fullLink));
+
+                    emailToSend.setHTMLBody(email.getHTMLBody().replace('{{$$$Text_to_replace}}', fullLink));
+                    emailToSend.setHTMLBody(emailToSend.getHTMLBody().replace('{{$$$Account_to_replace}}', acc.Name));
+                    if (toaddressesMap.containsKey(emailString)) {
+                        emailToSend.setHTMLBody(emailToSend.getHTMLBody().replace('{{$$$FirstName_to_replace}}', toaddressesMap.get(emailString)));
+                    }
+                    emailToSend.setSubject(email.getSubject());
+                    msgListToBeSent.add(emailToSend);
+                }
+                // Do a final send of the email, using Percy
+                ACT_GEN_EmailFunctions objPercy = new ACT_GEN_EmailFunctions();
+
+                objPercy.callingFunction = 'ACT_IDP_RequestAccessController.sendEmailNotification';
+                objPercy.emailToProcess = ACT_GEN_EmailFunctionsIterator.convertMessages(msgListToBeSent);
+
+                Database.executeBatch(objPercy, 10);
+
+            }
+        } catch (Exception e) {
+            CC_SC_ERR_EventLogger.LogSingleError(e, null, 'Error', null, 'Send Email Notification Request Access Error', e.getMessage(), '', '', '');
+            AuraHandledException ex = new AuraHandledException(e.getMessage());
+            throw ex;
+        }
+    }
+
+
+}
