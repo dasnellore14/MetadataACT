@@ -1,0 +1,19 @@
+<!--
+ - Created by adamsm on 1/25/2019.
+ -->
+
+<aura:component controller="ACT_CommunityBaseController"
+                description="ACT_CommunityBase"
+                extensible="true">
+
+    <!-- Attributes -->
+    <aura:attribute name="consoleDebug" type="Boolean" access="global" default="true"/>
+    <aura:attribute name="userId" type="String" access="global"/>
+
+    <!-- Do Init -->
+    <aura:handler name="init" action="{!c.initCommunityBase}" value="{!this}"/>
+
+    <!-- Child Component Body -->
+    {!v.body}
+
+</aura:component>
