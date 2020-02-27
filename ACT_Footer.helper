@@ -1,0 +1,14 @@
+/**
+ * Created by adamsm on 1/14/2019.
+ */
+({
+    doInit : function(component, event, helper) {
+        helper.doCallout(component, 'c.getUserId', null).then(function(response){
+            component.set("v.userId", response);
+        });
+        helper.doCallout(component, 'c.isGuestUser', null).then(function(response){
+            component.set("v.isGuest", response);
+        });
+
+    },
+})
