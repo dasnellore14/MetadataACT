@@ -1,0 +1,503 @@
+/**
+ * Created by mitulpatel on 10/30/18.
+ */
+({
+    qsToEventMap: {
+        'startURL'  : 'e.c:setStartUrl'
+    },
+
+    qsToEventMap2: {
+        'expid'  : 'e.c:setExpId'
+    },
+
+    getTimeZoneList : function (component, event, helper) {
+
+            try
+            {
+                var action = component.get("c.getTimeZone");
+                debugger;
+
+                  action.setCallback(this, function(response){
+                    var state = response.getState();
+                    if (state === "SUCCESS")
+                    {
+                          var returnValue = response.getReturnValue();
+                          console.log(returnValue);
+                           var arrayList=[];
+                           var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                           console.log(tz);
+
+                           // Handle browsers that can't resolve Intl.DateTimeFormat().resolvedOptions().timeZone
+                           if (!tz) {
+                               tz = 'America/Chicago';
+                           }
+                           console.log(tz);
+
+                           component.set("v.UsertimeZone",tz.replace('/','&'));
+                           var t;
+                           var notimeZone =[];
+                            for (var key in returnValue) {
+
+                              arrayList.push({key: key.replace('/','&'), value: returnValue[key]});
+                              notimeZone.push(key);
+
+                          }
+                          if(!notimeZone.includes(tz))
+                         {
+                             var defaultTimeZone = "America/Chicago";
+                             component.set("v.UsertimeZone",defaultTimeZone.replace('/','&'));
+
+                         }
+                          component.set('v.timeZoneList', arrayList);
+
+                    }
+                });
+
+                $A.enqueueAction(action);
+            }catch(ex){
+
+             }
+
+    },
+    handleSelfRegister: function (component, event, helper) {
+
+        let accountId = component.get("v.accountId");
+        let regConfirmUrl = component.get("v.regConfirmUrl");
+        let firstname = component.find("firstname").get("v.value");
+        let lastname = component.find("lastname").get("v.value");
+        let nickname = component.find("nickname").get("v.value");
+        let email = component.find("workEmail").get("v.value");
+        let includePassword = component.get("v.includePasswordField");
+        let password = component.find("password").get("v.value");
+        let confirmPassword = component.find("confirmPassword").get("v.value");
+        let extraFields = JSON.stringify(component.get("v.extraFields"));   // somehow apex controllers refuse to deal with list of maps
+        let startUrl = component.get("v.startUrl");
+        let resultsToast = $A.get("e.force:showToast");
+        var noErrors = true;
+
+        var firstNameCmp = component.find("firstname");
+        var lastNameCmp = component.find("lastname");
+        var nicknameCmp = component.find("nickname");
+        var pinCmp = component.find("pin");
+        var emailCmp = component.find("workEmail");
+        var phoneCmp = component.find("phone");
+        var termsCondCmp = component.find("termsCond");
+        var pinValue = component.find("pin").get("v.value");
+        var phone = component.find("phone").get("v.value");
+
+        var letters = new RegExp('^[a-zA-Z0-9-_\',. ]*$') ;
+        var pinLetters = "^[0-9]+$";
+
+        firstNameCmp.setCustomValidity("");
+        lastNameCmp.setCustomValidity("");
+        nicknameCmp.setCustomValidity("");
+        pinCmp.setCustomValidity("");
+        emailCmp.setCustomValidity("");
+        phoneCmp.setCustomValidity("");
+        termsCondCmp.setCustomValidity("");
+
+        var firstNameError = false;
+        var lastNameError = false;
+        var nicknameError = false;
+        var pinValueError = false;
+        var phoneError = false;
+        var DOBError = false;
+        var termsError = false;
+        var emailError = false;
+
+        if ((! firstname.match(letters)) || (firstname.trim() === '')  )
+        {
+             firstNameCmp.setCustomValidity("Please enter a valid first name.");
+             noErrors = false;
+            firstNameError = true;
+        }
+        else
+        {
+            firstNameCmp.setCustomValidity("");
+            noErrors = true;
+        }
+
+        if ((! lastname.match(letters)) || (lastname.trim() === '')  )
+        {
+            lastNameCmp.setCustomValidity("Please enter a valid last  name.");
+            noErrors = false;
+            lastNameError = true;
+        }
+        else
+        {
+            lastNameCmp.setCustomValidity("");
+            noErrors = true;
+        }
+
+       if ( !(nickname.length < 40) || (nickname.trim() == '')  )
+       {
+           nicknameCmp.setCustomValidity("Please enter a valid nickname.");
+           noErrors = false;
+           nicknameError = true;
+       }
+       else
+       {
+           nicknameCmp.setCustomValidity("");
+           noErrors = true;
+       }
+
+        if(pinValue == undefined )
+        {
+            pinCmp.setCustomValidity("Please enter a valid PIN.");
+            noErrors = false;
+            pinValueError = true;
+        }
+        else if ((! pinValue.match(pinLetters)) || (pinValue.trim() === '') || (pinValue.length < 4) )
+        {
+               pinCmp.setCustomValidity("Please enter a valid PIN.");
+               noErrors = false;
+              pinValueError = true;
+        }
+        else
+        {
+            pinCmp.setCustomValidity("");
+            noErrors = true;
+        }
+        if(phone == undefined || phone =='' )
+        {
+            phoneCmp.setCustomValidity("Please enter your phone number.");
+            noErrors = false;
+            phoneError = true;
+        }
+        else
+        {
+            phoneCmp.setCustomValidity("");
+            noErrors = true;
+        }
+         //alert(component.get("v.birthDateValid"));
+        if(component.get("v.birthDateValid")== false)
+        {
+            component.set('v.DOBShowError',true);
+            component.set('v.DOBErrorMessage',"Invalid birth date");
+            noErrors = false;
+            DOBError = true;
+        }
+        else
+        {
+            component.set('v.DOBShowError',false);
+            component.set('v.DOBErrorMessage',"");
+            noErrors = true;
+        }
+
+        if(component.find("termsCond").get("v.checked") == false)
+       {
+           termsCondCmp.setCustomValidity(" ");
+           noErrors = false;
+           termsError = true;
+
+
+       }
+       else
+       {
+           termsCondCmp.setCustomValidity("");
+           noErrors = true;
+       }
+       if(email == undefined || email =='')
+       {
+           emailCmp.setCustomValidity("Please enter your work email.");
+           noErrors = false;
+           emailError = true;
+
+       }
+       else
+       {
+           emailCmp.setCustomValidity("");
+           noErrors = true;
+       }
+
+        firstNameCmp.reportValidity();
+        lastNameCmp.reportValidity();
+        nicknameCmp.reportValidity();
+        pinCmp.reportValidity();
+        emailCmp.reportValidity();
+        phoneCmp.reportValidity();
+        termsCondCmp.reportValidity();
+
+
+
+
+
+
+        console.log('phone');
+        console.log(phoneNumber);
+        console.log('bday');
+        console.log(component.get('v.birthday'));
+		console.log('firstNameError-----'+firstNameError+' '+'lastNameError----'+lastNameError+' '+'phoneError---'+phoneError+' '+'DOBError---'+DOBError+' '+'pinValueError-----'+pinValueError+' '+'termsError-----'+termsError+' '+'emailError------'+emailError+' ');
+        if(firstNameError == false && lastNameError == false && nicknameError == false && phoneError == false && pinValueError == false && DOBError == false && termsError == false && emailError == false )
+        {
+                this.spinnerShow(component);
+                let action = component.get("c.selfRegister");
+                var phoneNumber = component.find('phone').get('v.value');
+                startUrl = decodeURIComponent(startUrl);
+                var selectedAccountId = component.get("v.selectedAccount.Id");
+                var accessToken = component.find("accessToken").get("v.value");
+                var selectedRoles = component.get("v.selectedRoles");
+                var accessLevel = component.get("v.accessLevel");
+                var accessCodeId =  component.get("v.accessCodeId");
+                var accessCodeUsage = component.get("v.accessCodeUsage");
+                var validateResponse = component.get("v.validateResponse");
+                var hasAcessCode    = component.find("checkboxAccessCode").get("v.checked");
+                var accessLevel = 'Standard';
+                var emetricOrgType = component.get("v.selectedAccount.eMetric_Org_Type__c");
+                if(hasAcessCode == true && emetricOrgType !='S')
+                {
+                    accessLevel = 'Trusted Agent';
+                }
+                if(hasAcessCode == true && emetricOrgType =='S')
+                                {
+                                    accessLevel = 'State Trusted Agent';
+                                }
+                var timeZoneValue ;
+                if(component.find("tZone").get("v.value") == '')
+                {
+                  timeZoneValue = component.get("v.UsertimeZone").replace('&','/');
+                }
+                else
+                {
+                    timeZoneValue = component.find("tZone").get("v.value").replace('&','/');
+                }
+
+            //alert('-validateResponse-'+validateResponse + '-accessToken-'+accessToken+'-selectedRoles---'+selectedRoles+'-accessLevel-'+accessLevel+'-accessCodeId-'+accessCodeId+'-accessCodeUsage-'+accessCodeUsage);
+
+           // alert(component.get("v.accessCode"));
+             //   var timeZoneValue = ;
+              //  if(component.find("tZone").get("v.value") == ''){
+                //            timeZoneValue = component.get("v.UsertimeZone").replace('&','/');
+             //   }
+                action.setParams({
+                    firstname: firstname,
+                    lastname: lastname,
+                    nickname: nickname,
+                    email: email,
+                    password: password,
+                    confirmPassword: confirmPassword,
+                    accountId: accountId,
+                    regConfirmUrl: regConfirmUrl,
+                    extraFields: extraFields,
+                    startUrl: startUrl,
+                    includePassword: includePassword,
+                    phoneNumber: phoneNumber,
+                    birthday: component.get('v.birthday'),
+                    accessToken: accessToken,
+                    selectedRoles: selectedRoles,
+                    accessLevel: accessLevel,
+                    accessCodeId: component.get("v.accessCodeId"),
+                    accessCodeUsage: component.get("v.accessCodeUsage"),
+                    validateResponse: component.get("v.validateResponse"),
+                    selectedAccount : selectedAccountId,
+                    UrlAccessId      :component.get("v.UrlAccessId"),
+                    accessCode : component.get("v.accessCode"),
+                    timezone :timeZoneValue,
+                    pin:component.find("pin").get("v.value"),
+                    selectedEmployer :component.get("v.selectedEmployer.Id")
+                });
+                 action.setCallback(this, function (a) {
+                    try {
+                        let rtnValue = a.getReturnValue();
+
+                        if(a.getState()==='SUCCESS'){
+                            if (rtnValue !== null) {
+                                component.set("v.errorMessage", rtnValue);
+                                component.set("v.showError", true);
+                            }
+                            this.spinnerHide(component);
+                            if(component.get("v.trustedAgentType") == 'Ed-Fi Admin'){
+                                let urlEvent = $A.get("e.force:navigateToURL");
+                                urlEvent.setParams({
+                                    "url": '/?uid=' + (new Date).getTime()
+                                });
+                                urlEvent.fire();
+                            }
+                        }
+                        else{
+                            var strError = a.getError()[0].message;
+                            var strError = strError.replace('[',"");
+                            var strError = strError.replace(']',"");
+                            resultsToast.setParams({
+                                title: "Error processing self registration form",
+                                message: "There was an error processing the registration form."
+                            });
+                            //Fire toaster message
+                            resultsToast.fire();
+                            component.set("v.showError",true);
+                            component.set("v.errorMessage", strError);
+                            this.spinnerHide(component);
+                        }
+
+                    }
+                    catch(ex){
+                        this.spinnerHide(component);
+                    }
+
+                });
+                $A.enqueueAction(action);
+        }
+    },
+
+    getExtraFields : function (component, event, helper) {
+        let action = component.get("c.getExtraFields");
+        action.setParam("extraFieldsFieldSet", component.get("v.extraFieldsFieldSet"));
+        action.setCallback(this, function(a){
+            let rtnValue = a.getReturnValue();
+            if (rtnValue !== null) {
+                component.set('v.extraFields',rtnValue);
+            }
+        });
+        $A.enqueueAction(action);
+    },
+
+    setBrandingCookie: function (component, event, helper) {
+        let expId = component.get("v.expid");
+        if (expId) {
+            let action = component.get("c.setExperienceId");
+            action.setParams({expId:expId});
+            action.setCallback(this, function(a){ });
+            $A.enqueueAction(action);
+        }
+    },
+
+    DisableButton: function(component, event, helper){
+            debugger;
+
+            component.set("v.showError",false);
+            component.set("v.errorMessage", "");
+
+            var birthMonth = component.find("birthMonth").get("v.value");
+            var birthDay = component.find("birthDay").get("v.value");
+            var birthYear = component.find("birthYear").get("v.value");
+            var workEmail = component.find("workEmail").get("v.value");
+            var phone = component.find("phone").get("v.value");
+            var pin = component.find("pin").get("v.value");
+            var timeZone = component.find("tZone").get("v.value");
+            var termsCheck = false;
+            var termsCheck1 = false;
+            var bMonth = parseInt(birthMonth) + 1;
+            if(component.find("termsCond").get("v.checked") !=undefined)
+                termsCheck = component.find("termsCond").get("v.checked");
+            //if(component.find("termsCond1").get("v.checked") !=undefined)
+                //termsCheck1 = component.find("termsCond1").get("v.checked");
+
+            let firstname = component.find("firstname").get("v.value");
+            let lastname = component.find("lastname").get("v.value");
+            let nickname = component.find("nickname").get("v.value");
+            let consentChecked = component.get("v.consentChecked");
+            let selectedRolesLen = component.get("v.selectedRoles.length");
+            let selectedAccountId = component.get("v.selectedAccount.Id");
+
+          //  var s = Date(2000+18, 10-1, 30);
+            //alert(new Date(Date.parse("February 29, 2019")));
+            var dateofBirth = new Date(birthYear, birthMonth, birthDay);
+            var s = Date.now();
+            var ageDifMs = Date.now() - dateofBirth.getTime();
+            var ageDate = new Date(ageDifMs); // milliseconds from epoch
+            debugger;
+
+
+            var selectedDate = birthMonth + birthDay+','+birthYear ;
+            //var letters = /^[a-zA-Z-,]+(\s{0,1}[a-zA-Z-, ])*$/;
+             //var letters = "^(?:[A-Za-z]+)(?:[A-Za-z0-9 _]*)$";
+             var letters = new RegExp('^[a-zA-Z0-9-_,. ]*$') ;
+            var lettersOnly = false;
+            if(! firstname.match(letters)  )
+            {
+                lettersOnly = true;
+            }
+            if(! lastname.match(letters)  )
+            {
+                lettersOnly = true;
+            }
+           // to check PIN Validation
+              var numeric = "^[0-9]+$";
+              var numericOnly = true;
+        if ((! pin.match(numeric)) || (pin.trim() === '') ||pin == undefined || ((pin.length < 4)) )
+        {
+            numericOnly= false;
+        }
+
+            //to check if entered value is a number or not
+            var birthDayNumber = isNaN(birthDay);
+
+            var LeapYear = ((birthYear % 4 == 0) && (birthYear % 100 != 0)) || (birthYear % 400 == 0);
+
+             console.log("firstname, lastname, birthDay ,birthDayNumber, termsCheck,  selectedRolesLen , selectedAccountId : " + firstname + ',' + lastname + ',' + birthDay +',' +birthDayNumber
+               +',' +termsCheck +
+               + ',' + selectedRolesLen
+                + ',' + selectedAccountId
+                +','+component.get("v.haveAcessCode")
+                );
+            //     ( component.get("v.haveAcessCode")==true  && component.get("v.disableshowAccess") ==true )  ||
+           //alert(firstname + 'consentChecked,' +lastname + 'consentChecked,' +consentChecked + 'haveAcessCode,' +component.get("v.haveAcessCode") + 'selectedRolesLen,' +selectedRolesLen + ' selectedAccountId ,' +selectedAccountId +' Diasbleshow ----'+ component.get("v.disableshowAccess")  );
+              // ( /*component.get("v.haveAcessCode")==true )
+            if(
+                phone == undefined || phone =='' || workEmail == undefined ||  workEmail == '' || numericOnly == false || termsCheck == false || Math.abs(ageDate.getUTCFullYear() - 1970) <=17  || birthDay =='' || birthDay == undefined || birthDayNumber == true ||
+                lettersOnly == true || firstname.trim() === '' || firstname == undefined  || lastname.trim() === '' || lastname == undefined   /* selectedRolesLen ===0 ||*/
+
+              ) {
+                //component.set('v.disableSubmitButton', true);
+                console.log("if condition");
+
+            }
+            else {
+
+
+                if(birthDayNumber == false)
+                {
+                    if(birthMonth == "01" && LeapYear == true && birthDay > 29)
+                    {
+                        component.set('v.disableSubmitButton', true);
+                    }
+                    else if(birthMonth == "01" && LeapYear == false && birthDay > 28)
+                    {
+                        component.set('v.disableSubmitButton', true);
+                    }
+                    else if(birthMonth != "01" && birthDay > 31)
+                    {
+                        component.set('v.disableSubmitButton', true);
+                    }
+
+
+                    else
+                    {
+                        component.set('v.disableSubmitButton', false);
+                    }
+                    console.log("else if  condition");
+                }
+                else
+                {
+                    component.set('v.disableSubmitButton', false);
+                    console.log("else condition");
+                }
+
+            }
+
+
+        },
+
+    spinnerHide:  function(component) {
+        var spinner = component.find("validateSpinner");
+        $A.util.addClass(spinner, "slds-hide");
+
+
+    },
+
+    spinnerShow: function(component) {
+        var spinner = component.find("validateSpinner");
+        $A.util.removeClass(spinner, "slds-hide");
+
+    },
+
+    killSession:  function(component) {
+        debugger;
+        var urlString = window.location.href;
+        var baseURL = urlString.substring(0, urlString.lastIndexOf("/s"));
+
+        baseURL += '/secur/logout.jsp?';
+        component.set('v.logoutSource', baseURL);
+
+    }
+});
