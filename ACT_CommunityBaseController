@@ -1,0 +1,231 @@
+/**
+* Created by adamsm on 1/25/2019.
+*/
+
+public with sharing class ACT_CommunityBaseController {
+    //////////////////////
+    // Aura Methods
+    //////////////////////
+    @AuraEnabled
+    public static string getUserId() {
+        return UserInfo.getUserId();
+    }
+    @AuraEnabled
+    public static string isGuestUser() {
+        return UserInfo.getUserType();
+    }
+
+    //////////////////////
+    // Static Apex Methods
+    //////////////////////
+    public static string CommunityBaseURL() {
+        try {
+            if (Test.isRunningTest()) {
+                return '';
+            }
+
+            ACT_Community_URL__c URL = ACT_Community_URL__c.getInstance();
+            String baseURL = URL.Base_URL__c;
+
+            if(baseURL == null) {
+                throw new CC_SC_GEN_Exception('No ACT_Community_URL__c custom setting found');
+            }
+
+            return baseURL;
+
+        } catch (Exception ex) {
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', '', 'Error getting Community Base URL', ex.getMessage(), '', '', '');
+            throw ex;
+        }
+    }
+
+    public static string ConverteMetricsRoleToSuccessCommunityRole(String eMetricsRole, String eMetricOrgType) {
+        if (eMetricsRole != null && eMetricOrgType == 'S') {
+            return 'State User';
+        }
+
+        if (eMetricsRole == 'Admin-Full') {
+            return 'Trusted Agent';
+        }
+
+        if (eMetricsRole != null) {
+            return 'Standard';
+        }
+
+        return null;
+    }
+
+    public static string CommaDelimited(String[] InputStrings) {
+        String strReturn = '';
+
+        for (String thisS : InputStrings) {
+            if (strReturn != '' && !String.isEmpty(thisS)) {
+                strReturn += ', ';
+            }
+
+            if (!String.isEmpty(thisS)) {
+                strReturn += thisS;
+            }
+        }
+
+        return strReturn;
+    }
+
+    public static string CommaDelimitedWithAnd(String[] InputStrings) {
+        String strReturn = CommaDelimited(InputStrings);
+        String[] aryStrings = strReturn.split(',');
+
+        if (aryStrings.size() == 2) {
+            strReturn = aryStrings[0] + ' and' + aryStrings[1];
+        }
+
+        if (aryStrings.size() > 2) {
+            strReturn = '';
+
+            for (integer intX = 0; intX < aryStrings.size(); intX++) {
+                if (intX < aryStrings.size() - 1) {
+                    strReturn += aryStrings[intX].trim() + ', ';
+                }
+                else {
+                    strReturn += 'and ' + aryStrings[intX].trim();
+                }
+            }
+        }
+
+        return strReturn;
+    }
+
+    public static Id CurrentUserContactId() {
+        User thisUser = [
+                SELECT
+                        ContactId
+                FROM
+                        User
+                WHERE
+                        Id = :UserInfo.getUserId()
+        ];
+
+        return thisUser.ContactId;
+    }
+
+    public static boolean UserHasPermissionSet(Id UserId, String PermissionSetName) {
+        map<string, boolean> mapPS = UserHasPermissionSets(UserId, new set<string>{PermissionSetName});
+
+        return mapPS.get(PermissionSetName);
+    }
+
+    public static map<string, boolean> UserHasACRPermission(Id UserId, set<string> PermissionSetNames) {
+        // Create a map for the return values
+        map<string, boolean> mapReturn = new map<string, boolean>();
+
+        // Get the permission sets this user has from ACR records
+        list<AccountContactRelation> lstACR =
+            [
+                SELECT
+                Ed_Fi_Role__c,
+                eMetrics_Role__c,
+                Success_Community_Role__c,
+                Account.eMetric_Org_Type__c,
+                        TAA_Role__c
+                FROM
+                AccountContactRelation
+                WHERE
+                IsActive = true
+                AND Contact.User__c =: UserId
+            ];
+
+        for (AccountContactRelation thisACR : lstACR) {
+            // Check for Ed-Fi, having any value allows the SAO_Ed_Fi_Admin permission set
+            if (thisACR.Ed_Fi_Role__c != null && PermissionSetNames.contains('SAO_Ed_Fi_Admin')) {
+                mapReturn.put('SAO_Ed_Fi_Admin', true);
+            }
+
+            // Check for a trusted agent
+            if (thisACR.Success_Community_Role__c == 'Trusted Agent' && PermissionSetNames.contains('SAO_Trusted_Agent')) {
+                mapReturn.put('SAO_Trusted_Agent', true);
+            }
+
+            // Check for an online reporting user
+            if (thisACR.Success_Community_Role__c == 'Standard' && thisACR.Account.eMetric_Org_Type__c != 'S' && PermissionSetNames.contains('SAO_Online_Reporting_User')) {
+                mapReturn.put('SAO_Online_Reporting_User', true);
+            }
+
+            // Check for a state user
+            if (thisACR.Success_Community_Role__c != null && thisACR.Account.eMetric_Org_Type__c == 'S') {
+                if (thisACR.Success_Community_Role__c == 'State Trusted Agent' && PermissionSetNames.contains('SAO_Trusted_Agent')) {
+                    mapReturn.put('SAO_Trusted_Agent', true);
+                }
+                else if(PermissionSetNames.contains('SAO_State_User')){
+                    mapReturn.put('SAO_State_User', true);
+                }
+            }
+            // Check for a TAA role.
+            if (String.isNotBlank(thisACR.TAA_Role__c) && PermissionSetNames.contains('SAO_TAA')) {
+                mapReturn.put('SAO_TAA', true);
+            }
+        }
+
+        // Fill in what the user doesn't have
+        for (string thisPS : PermissionSetNames) {
+            if (!mapReturn.containsKey(thisPS)) {
+                mapReturn.put(thisPS, false);
+            }
+        }
+
+        return mapReturn;
+    }
+
+
+    public static map<string, boolean> UserHasPermissionSets(Id UserId, set<string> PermissionSetNames) {
+        // For now, redirect to ACR based permissions
+        return UserHasACRPermission(UserId, PermissionSetNames);
+
+        /*
+
+// Create a map for the return values
+map<string, boolean> mapReturn = new map<string, boolean>();
+
+// Get the permission sets this user has
+list<PermissionSetAssignment> lstPSA =
+[
+SELECT
+PermissionSetId,
+PermissionSet.Name
+FROM
+PermissionSetAssignment
+WHERE
+AssigneeId =: UserId
+AND PermissionSet.Name In: PermissionSetNames
+];
+
+for (PermissionSetAssignment thisPSA : lstPSA) {
+mapReturn.put(thisPSA.PermissionSet.Name, true);
+}
+
+// Fill in what the user doesn't have
+for (string thisPS : PermissionSetNames) {
+if (!mapReturn.containsKey(thisPS)) {
+mapReturn.put(thisPS, false);
+}
+}
+
+return mapReturn;
+
+*/
+    }
+
+    public static string UserProfileName(Id UserId) {
+        List<Profile> lstProfile =
+            [
+                SELECT
+                Id,
+                Name
+                FROM
+                Profile
+                WHERE
+                Id =: userinfo.getProfileId() LIMIT 1
+            ];
+
+        return lstProfile[0].Name;
+    }
+}
