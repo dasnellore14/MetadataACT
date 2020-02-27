@@ -1,0 +1,32 @@
+/**
+ * Created by adamsm on 5/2/2019.
+ */
+.THIS {
+}
+
+.THIS .greenOnWhite svg {
+    fill: green;
+}
+
+.THIS .itemSeparator {
+    color: black;
+}
+
+.THIS .selectedViewText {
+    background-color: white;
+    border: 1px solid lightgrey;
+    border-radius: 4px;
+    color: black;
+    padding: 5px;
+    text-decoration: none !important;
+    underline: none;
+    vertical-align: bottom;
+}
+
+.THIS .whiteicon svg {
+    fill:white !important
+}
+
+.THIS .findMe {
+    background-color:red;
+}
