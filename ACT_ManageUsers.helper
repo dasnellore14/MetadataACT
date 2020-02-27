@@ -1,0 +1,865 @@
+/**
+ * Created by brianpoulsen on 9/10/18.
+ */
+({
+    checkAddUsersButton: function(component, helper) {
+        var blnEmailValue = component.get("v.userEmails");
+        var objSelectedUsers = component.get("v.inviteUsersSelectedRows");
+
+        var blnDisabled = !(blnEmailValue || (objSelectedUsers && objSelectedUsers.length > 0));
+
+        component.set("v.buttonAddNewAccessDisabled", blnDisabled);
+    },
+
+    checkStep3: function(component, helper) {
+        var blnStep3 = component.get("v.makeEdFi") || component.get("v.makeTAA") || component.get("v.makeTrustedAgent") || component.get("v.makeStateTrustedAgent") || component.get('v.checkedDV') || component.get('v.checkedSV');
+
+        component.set("v.addAccess3", blnStep3);
+    },
+
+    doInit: function(component, helper) {
+        // Call out to check permissions
+        helper.doCallout(component, helper, "c.intitializePage", null).then(function(response) {
+            // Log the response
+            helper.showConsole(component, 'intitializePage response = ' + response);
+
+            // Either show a toaster and redirect to the home page, or show the page
+            if (response.HasPermission == true) {
+                component.set("v.trustedAgent", true);
+                component.set("v.stateTrustedAgent", true);
+
+                // Look for an initial view
+                var initialView = helper.getUrlParameter('view');
+
+                if (initialView == 'openrequests') {
+                    helper.selectView(component, helper, 'Open Access Requests');
+                }
+
+                if (initialView == 'addaccess') {
+                     helper.selectView(component, helper, 'Add Access');
+                }
+
+                // Set the knowledge URL
+                component.set("v.knowledgeURL", response.KnowledgeURL);
+
+                // Set if add access is enabled
+                component.set("v.enableAddAccess", response.EnableAddAccess);
+
+                // Set if S&D is enabled
+                component.set("v.enableStateAndDistrict", response.EnableStateAndDistrict);
+            }
+            else {
+                helper.showMessage('Warning', 'You do not have access to the manage users page.', true);
+                helper.gotoUrl(component, helper, '/');
+            }
+
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        }).catch(function(errors) {
+            console.log('errors = ' + errors);
+
+            if (errors) {
+                helper.showMessage('Error', errors[0].message, true);
+            }
+
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        });
+    },
+
+    loadAccessRecords: function(component, helper) {
+        // Show the spinner, loading message
+        helper.spinnerShow(component);
+
+        component.set("v.accessRecordsLoading", 'true');
+        component.set("v.accessRecordsStatus", 'Loading...');
+
+        // Assemble the parameter
+        var strParams = {
+            "MaxRows" : component.get("v.accessRecordsMax"),
+            "ViewType" : component.get("v.selectedView")
+        };
+
+        // Call out to get the access records
+        helper.doCallout(component, helper, "c.loadAccessRecords", strParams).then(function(response) {
+            // Log the response
+            helper.showConsole(component, 'loadAccessRecords response = ' + response);
+
+            // Set the data based on the response
+            component.set("v.accessRecordsWrapper", response);
+            component.set("v.accessRecordsSize", Number(response.AccessRecords.length));
+            helper.showConsole(component, 'records = ' + Number(response.AccessRecords.length));
+
+            // Check if loading more should be enabled
+            component.set("v.accessRecordsEnableLoading", !response.AllRecordsLoaded);
+
+            // Check if the sort should be set
+            if (response.SortField != null) {
+                component.set("v.accessRecordsSortedBy", response.SortField);
+                component.set("v.accessRecordsSortedDirection", response.SortDirection);
+            }
+
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        }).catch(function(errors) {
+            if (errors) {
+                helper.showMessage('Error', errors[0].message, true);
+            }
+
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        });
+    },
+
+    loadACRRecords: function(component, helper) {
+        // Show the spinner, loading message
+        helper.spinnerShow(component);
+
+        // Get the selected account
+        var selectedAccount = component.get("v.selectedAddAccessAccount");
+
+        // Assemble the parameter
+        var strParams = {
+            "AccountId" : selectedAccount.Id,
+        };
+
+        helper.showConsole(component, 'selectedAccount.id = ' + selectedAccount.Id);
+
+        // Call out to get the access records
+        helper.doCallout(component, helper, "c.loadACRRecords", strParams).then(function(response) {
+            // Log the response
+            helper.showConsole(component, 'loadACRRecords response = ' + response);
+
+            // Set the data based on the response
+            component.set("v.inviteUsersWrapper", response);
+            component.set("v.inviteUsersSize", Number(response.ACRRecords.length));
+            helper.showConsole(component, 'records = ' + Number(response.ACRRecords.length));
+
+            // Check if the sort should be set
+            if (response.SortField != null) {
+                component.set("v.inviteUsersSortedBy", response.SortField);
+                component.set("v.inviteUsersSortedDirection", response.SortDirection);
+            }
+
+            // Set if partner apps are enabled
+            component.set("v.enableEdFi", response.EnableEdFi);
+            component.set("v.enableTAA", response.EnableTAA);
+
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        }).catch(function(errors) {
+            helper.showMessage('Error', errors, true);
+
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        });
+    },
+
+    processAddUsersClick: function(component, helper) {
+        // Collect the form data
+        var blnCheckedDV = component.get("v.checkedDV");
+        var blnCheckedSV = component.get("v.checkedSV");
+        var blnMakeEdFi = component.get("v.makeEdFi");
+        var blnMakeTAA = component.get("v.makeTAA");
+        var blnMakeTrustedAgent = component.get("v.makeTrustedAgent");
+        var blnMakeStateTrustedAgent = component.get("v.makeStateTrustedAgent");
+        var strAccessLevel;
+        var strSelectedUsers = '';
+        var strUserEmails = component.get("v.userEmails");
+        var objAccount = component.get("v.selectedAddAccessAccount");
+        var objRequest = new Object();
+        var objSelectedUsers = component.get("v.inviteUsersSelectedRows");
+        var eMetricOrgType = component.get("v.selectedAddAccessAccount").eMetric_Org_Type__c;
+        var onlineReportingAccessLevel = component.get("v.onlineReportingButtonAction");
+
+        if (!onlineReportingAccessLevel && (blnCheckedDV != null || blnCheckedSV != null )) {
+             helper.showMessage('Warning', 'Please select an Online Reporting Access Level to complete this form.', false);
+             return;
+        }
+        // Show the spinner
+        helper.spinnerShow(component);
+
+        // Determine the access level
+        if (blnMakeTrustedAgent) {
+            strAccessLevel = 'Trusted Agent';
+        }
+        // Determine the access level for state trusted agent
+                        else if (blnMakeStateTrustedAgent && eMetricOrgType == 'S') {
+                            strAccessLevel = 'State Trusted Agent';
+                        }
+        else if (blnCheckedDV) {
+            strAccessLevel = 'Detail Viewer';
+        }
+        else {
+            strAccessLevel = blnCheckedSV ? 'Summary Viewer' : 'None';
+        }
+
+        // Get the selected users, if any
+        if (objSelectedUsers && objSelectedUsers.length > 0) {
+            for (var intX = 0; intX < objSelectedUsers.length; intX++) {
+                if (intX > 0) {
+                    strSelectedUsers += ',';
+                }
+
+                strSelectedUsers += objSelectedUsers[intX].ContactId;
+            }
+        }
+
+        // Assemble the parameters
+        objRequest.AccessLevel = strAccessLevel;
+        objRequest.AccountId = objAccount.Id;
+        objRequest.EdFiAccess = blnMakeEdFi;
+        objRequest.SelectedUsers = strSelectedUsers;
+        objRequest.TAALevel = blnMakeTAA;
+        objRequest.UserEmails = strUserEmails;
+        objRequest.OLRAccessLevel = onlineReportingAccessLevel;
+
+        // Cancel out OLRAccess level if it is not enabled
+        if (!component.get("v.enableStateAndDistrict")) {
+            objRequest.OLRAccessLevel = null;
+        }
+
+        // Set the trusted agent values
+        if (strAccessLevel == 'Trusted Agent') {
+            objRequest.EdFiAccess = 'true';
+            objRequest.TAALevel = 'true';
+        }
+
+        // Turn off partner apps if they are not enabled
+        if (component.get("v.enableEdFi") != true) {
+            objRequest.EdFiAccess = 'false';
+        }
+
+        if (component.get("v.enableTAA") != true) {
+            objRequest.TAALevel = 'false';
+        }
+
+        helper.showConsole(component, 'processAddAccess parameters = ' + objRequest.toString());
+
+        var strParams = {
+            "addAccessRequest" : JSON.stringify(objRequest)
+        };
+
+        // Call out to get the access records
+        helper.doCallout(component, helper, "c.processAddAccess", strParams).then(function(response) {
+            // Log the response
+            helper.showConsole(component, 'processAddAccess response = ' + response);
+
+            if (response == true) {
+                helper.showMessage('success', 'All good! New users will receive an invitation to the email provided and existing users will be granted access to the organziation you designated.', false);
+                helper.resetAddAccess(component, helper);
+            }
+        }).catch(function(errors) {
+            if (errors) {
+                helper.showMessage('Error', errors[0].message, true);
+            }
+        });
+
+        // Hide the spinner
+        helper.spinnerHide(component);
+    },
+
+    resetAddAccess: function(component, helper) {
+        component.set("v.addAccess3", false);
+        component.set("v.buttonAddNewAccessDisabled", true);
+        component.set('v.checkedDV', false);
+        component.set('v.checkedSV', false);
+        component.set("v.inviteUsersSelectedRows", null);
+        component.set("v.makeEdFi", false);
+        component.set("v.makeStateTrustedAgent", false);
+        component.set("v.makeTAA", false);
+        component.set("v.makeTrustedAgent", false);
+        component.set("v.selectedAddAccessAccount", null);
+        component.set("v.userEmails", '');
+    },
+
+    selectView: function(component, helper, newView) {
+        // Reset the load number
+        component.set("v.accessRecordsMax", component.get("v.accessRecordsIncrement"));
+
+        // Reset the component variables
+        component.set("v.accessRecordsSelectedRows", null);
+        component.set("v.buttonUpdateDisabled", true);
+        component.set("v.buttonApproveVariant", 'neutral');
+        component.set("v.buttonCancelVariant", 'neutral');
+        component.set("v.buttonExtendVariant", 'neutral');
+        component.set("v.buttonRejectVariant", 'neutral');
+        component.set("v.requestButtonAction", null);
+
+        // Load the new view
+        component.set("v.selectedView", newView);
+        component.set("v.selectedViewLowerCase", newView.toLowerCase());
+        component.set("v.selectOptionTitle", newView);
+
+        // Set up the columns, based on the view type
+        var objColumns;
+
+        switch (newView) {
+            case 'Accepted Invitations':
+                objColumns = [
+                    {
+                        fieldName: 'ContactLink',
+                        initialWidth: 325,
+                        label: 'Email Address',
+                        type: 'url',
+                        typeAttributes:
+                        {
+                            label: {fieldName: 'EmailAddress'},
+                            target: '_blank'
+                        }
+                    },
+                    {
+                        fieldName: 'OrganizationLink',
+                        initialWidth: 380,
+                        label: 'Organization',
+                        type: 'url',
+                        typeAttributes:
+                        {
+                            label: {fieldName: 'Organization'},
+                            target: '_blank'
+                        }
+                    },
+                    {
+                        fieldName: 'Type',
+                        initialWidth: 150,
+                        label: 'Type',
+                        type: 'text'
+                    },
+                    {
+                        fieldName: 'RequestedRole',
+                        initialWidth: 240,
+                        label: 'Role',
+                        type: 'text'
+                    },
+                    {
+                        fieldName: 'Grantor',
+                        initialWidth: 240,
+                        label: 'Grantor',
+                        type: 'text'
+                    }
+                ];
+
+                break;
+
+            case 'Add Access':
+                // Show the Add New Access Section
+                component.set("v.addAccess1", true);
+
+                // Remove the table elements
+                objColumns = null;
+                component.set("v.accessRecordsSize", -1);
+
+                if (component.get("v.accessRecordsWrapper")) {
+                    component.set("v.accessRecordsWrapper.ViewInstructions", null);
+                    component.set("v.accessRecordsWrapper.LazyLoading", false);
+                }
+
+                helper.resetAddAccess(component, helper);
+
+                return;
+
+                  case 'Revoke Access':
+                                component.set("v.revokeAccess",true);
+                                return;
+
+            case 'Cancelled Invitations':
+            case 'Expired Invitations':
+                objColumns = [
+                    {
+                        fieldName: 'EmailAddress',
+                        initialWidth: 325,
+                        label: 'Email Address',
+                        type: 'text',
+                    },
+                    {
+                        fieldName: 'OrganizationLink',
+                        initialWidth: 380,
+                        label: 'Organization',
+                        type: 'url',
+                        typeAttributes:
+                        {
+                            label: {fieldName: 'Organization'},
+                            target: '_blank'
+                        }
+                    },
+                    {
+                        fieldName: 'Type',
+                        initialWidth: 150,
+                        label: 'Type',
+                        type: 'text'
+                    },
+                    {
+                        fieldName: 'RequestedRole',
+                        initialWidth: 240,
+                        label: 'Role',
+                        type: 'text'
+                    },
+                    {
+                        fieldName: 'Grantor',
+                        initialWidth: 240,
+                        label: 'Grantor',
+                        type: 'text'
+                    }
+                ];
+
+                break;
+
+            case 'Approved Requests':
+            case 'Rejected Requests':
+                objColumns = [
+                    {
+                        fieldName: 'ContactName',
+                        initialWidth: 250,
+                        label: 'Name',
+                        type: 'text',
+                    },
+                    {
+                        fieldName: 'OrganizationLink',
+                        initialWidth: 300,
+                        label: 'Organization',
+                        type: 'url',
+                        typeAttributes:
+                        {
+                            label: {fieldName: 'Organization'},
+                            target: '_blank'
+                        }
+                    },
+                    {
+                        fieldName: 'RequestDate',
+                        initialWidth: 200,
+                        label: 'Request Date',
+                        sortable: true,
+                        type: 'date',
+                        typeAttributes:
+                        {
+                            year: "numeric",
+                            month: "long",
+                            day: "2-digit",
+                            hour: "2-digit",
+                            hour12: "true",
+                            minute: "2-digit"
+                        }
+
+                    },
+                    {
+                        fieldName: 'Type',
+                        initialWidth: 150,
+                        label: 'Type',
+                        type: 'text'
+                    },
+                    {
+                        fieldName: 'RequestedRole',
+                        initialWidth: 200,
+                        label: 'Requested Role',
+                        type: 'text'
+                    },
+                    {
+                        fieldName: 'EvaluatedBy',
+                        initialWidth: 235,
+                        label: 'Evaluated By',
+                        type: 'text'
+                    }
+                ];
+
+                break;
+
+            case 'Open Access Requests':
+                objColumns = [
+                    {
+                        fieldName: 'ContactName',
+                        initialWidth: 300,
+                        label: 'Name',
+                        sortable: true,
+                        type: 'text',
+                    },
+                    {
+                        fieldName: 'OrganizationLink',
+                        initialWidth: 460,
+                        label: 'Organization',
+                        sortable: true,
+                        type: 'url',
+                        typeAttributes:
+                        {
+                            label: {fieldName: 'Organization'},
+                            target: '_blank'
+                        }
+                    },
+                    {
+                        fieldName: 'RequestDate',
+                        initialWidth: 200,
+                        label: 'Request Date',
+                        sortable: true,
+                        type: 'date',
+                        typeAttributes:
+                        {
+                            year: "numeric",
+                            month: "long",
+                            day: "2-digit",
+                            hour: "2-digit",
+                            hour12: "true",
+                            minute: "2-digit"
+                        }
+                    },
+                    {
+                        fieldName: 'Type',
+                        initialWidth: 150,
+                        label: 'Type',
+                        sortable: true,
+                        type: 'text'
+                    },
+                    {
+                        fieldName: 'RequestedRole',
+                        initialWidth: 200,
+                        label: 'Requested Role',
+                        sortable: true,
+                        type: 'text'
+                    }
+                ];
+
+                break;
+
+            case 'Open Invitations':
+                objColumns = [
+                    {
+                        fieldName: 'EmailAddress',
+                        initialWidth: 285,
+                        label: 'Email Address',
+                        sortable: true,
+                        type: 'text',
+                    },
+                    {
+                        fieldName: 'OrganizationLink',
+                        initialWidth: 300,
+                        label: 'Organization',
+                        sortable: true,
+                        type: 'url',
+                        typeAttributes:
+                        {
+                            label: {fieldName: 'Organization'},
+                            target: '_blank'
+                        }
+                    },
+                    {
+                        fieldName: 'ExpirationDate',
+                        initialWidth: 200,
+                        label: 'Expiration Date',
+                        sortable: true,
+                        type: 'date',
+                        typeAttributes:
+                        {
+                            year: "numeric",
+                            month: "long",
+                            day: "2-digit",
+                        }
+                    },
+                    {
+                        fieldName: 'Type',
+                        initialWidth: 125,
+                        label: 'Type',
+                        sortable: true,
+                        type: 'text'
+                    },
+                    {
+                        fieldName: 'RequestedRole',
+                        initialWidth: 200,
+                        label: 'Role',
+                        sortable: true,
+                        type: 'text'
+                    },
+                    {
+                        fieldName: 'Grantor',
+                        initialWidth: 200,
+                        label: 'Grantor',
+                        sortable: true,
+                        type: 'text'
+                    }
+                ];
+
+                break;
+
+            default:
+                // Throw Error?
+        }
+
+        component.set('v.accessRecordsColumns', objColumns);
+
+        // Load the records
+        helper.loadAccessRecords(component, helper);
+    },
+
+    sortBy: function (field, reverse, primer) {
+        var key = primer ? function(x) {return primer(x[field])} : function(x) {return x[field]};
+
+        reverse = !reverse ? 1 : -1;
+        return function (a, b) {
+            return a = key(a), b = key(b), reverse * ((a > b) - (b > a));
+        }
+    },
+
+    sortData: function (component, fieldName, sortDirection) {
+        var reverse = sortDirection !== 'asc';
+        var sortFieldName;
+        var wrapper = component.get("v.accessRecordsWrapper")
+
+        // Swap out the field name, if necessary
+        switch (fieldName) {
+            case 'ContactLink':
+                sortFieldName = 'ContactName';
+                break;
+            case 'OrganizationLink':
+                sortFieldName = 'Organization';
+                break;
+            default:
+                sortFieldName = fieldName;
+        }
+
+        wrapper.AccessRecords.sort(this.sortBy(sortFieldName, reverse))
+        component.set("v.accessRecordsWrapper", wrapper);
+    },
+
+    spinnerHide: function(component) {
+        // Get component values
+        var spinner = component.find("loadingSpinner");
+        var status = '';
+        var wrapper = component.get("v.accessRecordsWrapper");
+
+        // Hide the spinner
+        $A.util.addClass(spinner, "slds-hide");
+
+        // Determine the access records status
+        if (wrapper) {
+            status += wrapper.RecordsLoaded.toString() + ' record'
+            status += wrapper.RecordsLoaded == 1 ? ' ' : 's ';
+            status += 'loaded. ';
+            status += wrapper.AllRecordsLoaded ? 'No more remaining.' : 'More records available; scroll down to load.';
+
+            component.set("v.accessRecordsStatus", status);
+        }
+
+        // Hide the loading message
+        component.set("v.accessRecordsLoading", 'false');
+
+        // Set the last load time
+        component.set("v.accessRecordsLastLoadTime", new Date());
+    },
+
+    spinnerShow: function(component) {
+        var spinner = component.find("loadingSpinner");
+        $A.util.removeClass(spinner, "slds-hide");
+    },
+
+    updateAccess: function(component, helper) {
+        // Get component info
+        var action = component.get("v.requestButtonAction");
+        var selectedRows = component.get("v.accessRecordsSelectedRows");
+        var setIds = '';
+        var onlineReportingAction = component.get("v.onlineReportingButtonAction");
+
+        // Check for no rows selected
+        if (!selectedRows || selectedRows.length == 0) {
+            helper.showMessage('Warning', 'Please select one or more access records to continue.', false);
+            return;
+        }
+
+        // check for no online reporting Actions selected
+        if (component.get("v.enableStateAndDistrict") && !onlineReportingAction && (action == 'Approve')) {
+             helper.showMessage('Warning', 'Please select an Online Reporting Access Level to complete this form.', false);
+             return;
+        }
+
+        for (var intX = 0; intX < selectedRows.length; intX++) {
+            if (intX > 0) {
+                setIds += ',';
+            }
+
+            setIds += selectedRows[intX].AccessId;
+        }
+
+        // Cancel out OLRAccess level if it is not enabled
+        if (!component.get("v.enableStateAndDistrict")) {
+            onlineReportingAction = '';
+        }
+
+        helper.showConsole(component, 'Action  = ' + action);
+        helper.showConsole(component, 'Access Records = ' + setIds);
+
+        // Process the records
+        helper.spinnerShow(component);
+
+        var params = {
+            "Action" : action,
+            "RecordIds" : setIds.toString(),
+            "onlineReportingAccess" : onlineReportingAction == '' ? '' : onlineReportingAction
+        }
+
+        helper.doCallout(component, helper, "c.processAccessRecords", params).then(function(response) {
+            // Log the response
+            helper.showConsole(component, 'updateAccess response = ' + response);
+
+            // Let the user know the records were processed
+            helper.showMessage('Success', selectedRows.length + ' record(s) were updated.');
+
+            // Refresh the page
+            helper.loadAccessRecords(component, helper);
+        }).catch(function(errors) {
+            console.log('errors = ' + errors);
+
+            if (errors) {
+                helper.showMessage('Error', errors[0].message, true);
+            }
+
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        });
+    },
+
+    revokeAccessHelper: function(component, event,helper) {
+        // Get the selected account
+        var selectedAccount = component.get("v.selectedRevokeAccessAccount");
+        if($A.util.isUndefinedOrNull(selectedAccount) || $A.util.isEmpty(selectedAccount)){
+            return;
+        }
+        if(selectedAccount.eMetric_Org_Type__c == 'S'){
+            component.set("v.showSeletedRevokeAccessOptionsButton",false);
+            component.set("v.selectedRevokeAccessOption",null);
+
+        }
+
+        // Set up the Revoke access columns.
+        var objColumns = [
+            {
+                fieldName: 'ContactLink',
+                initialWidth: 300,
+                label: 'Name',
+                sortable: true,
+                type: 'url',
+                typeAttributes:
+                {
+                    label: {fieldName: 'ContactName'},
+                    target: '_blank'
+                }
+            },
+            {
+                fieldName: 'Title',
+                initialWidth: 200,
+                label: 'Title',
+                sortable: true,
+                type: 'text'
+            },
+            {
+                fieldName: 'Phone',
+                initialWidth: 125,
+                label: 'Phone',
+                sortable: true,
+                type: 'text'
+            },
+            {
+                fieldName: 'EmailAddress',
+                initialWidth: 200,
+                label: 'Email',
+                sortable: true,
+                type: 'Email'
+            },
+            {
+                fieldName: 'strRoles',
+                initialWidth: 200,
+                label: 'Roles(s)',
+                sortable: true,
+                type: 'text'
+            }
+        ];
+
+        component.set("v.revokeAccessColumns", objColumns);
+
+        //Show the spinner, loading message
+        helper.spinnerShow(component);
+
+        // Assemble the parameter
+        var strParams = {
+            "AccountId" : selectedAccount.Id,
+        };
+        // Call out to get the revoke records
+        helper.doCallout(component, helper, "c.loadACRRecordsOnRevokeAction", strParams).then(function(response) {
+            // Log the response
+            helper.showConsole(component, 'loadACRRecordsForRevoke response = ' + response);
+
+            // Set the data based on the response
+            component.set("v.revokeAccessWrapper", response);
+            component.set("v.revokeAccessSize", Number(response.ACRRecords.length));
+
+
+            // Check if the sort should be set
+            if (response.SortField != null) {
+                component.set("v.revokeAccessSortedBy", response.SortField);
+                component.set("v.revokeAccessSortedDirection", response.SortDirection);
+            }
+
+            if(Number(response.ACRRecords.length) == 0){
+                //Show toast message
+                helper.showMessage('Error', 'No access records to be revoked.', true);
+            }
+
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        }).catch(function(errors) {
+            helper.showMessage('Error', errors, true);
+
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        });
+    },
+    processRevokeAccessRequestHelper : function(component, event,helper) {
+
+        var revokeAccessSelectedRows = component.get("v.revokeAccessSelectedRows");
+        if($A.util.isUndefinedOrNull(revokeAccessSelectedRows) || $A.util.isEmpty(revokeAccessSelectedRows)){
+            return;
+        }
+
+        //Show the spinner, loading message
+        helper.spinnerShow(component);
+
+        // Get the selected account
+        var selectedAccount = component.get("v.selectedRevokeAccessAccount");
+        var strACRIds = [];
+
+        for(var strKey in revokeAccessSelectedRows){
+            strACRIds.push(revokeAccessSelectedRows[strKey].strACRId);
+        }
+        // Assemble the parameter
+        var strParams = {
+            strACRIds : JSON.stringify(strACRIds),
+            accId : selectedAccount.Id,
+            selectedRevokeAccess : component.get('v.selectedRevokeAccessOption')
+        };
+        // Call out to get the revoke records
+        helper.doCallout(component, helper, "c.processRevokeAccessRequest", strParams).then(function(response) {
+            // Log the response
+            helper.showConsole(component, 'loadACRRecordsForRevoke response = ' + response);
+
+            // Set the data based on the response
+            component.set("v.revokeAccessWrapper", response);
+            component.set("v.revokeAccessSize", Number(response.ACRRecords.length));
+
+
+            // Check if the sort should be set
+            if (response.SortField != null) {
+                component.set("v.revokeAccessSortedBy", response.SortField);
+                component.set("v.revokeAccessSortedDirection", response.SortDirection);
+            }
+            //Show toast message
+            helper.showMessage('Success', 'Access revoked successfully.', false);
+            if(Number(response.ACRRecords.length) == 0){
+                //Show toast message
+                helper.showMessage('Error', 'No more access records to be revoked.', false);
+            }
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        }).catch(function(errors) {
+            helper.showMessage('Error', errors, true);
+
+            // Hide the spinner, loading
+            helper.spinnerHide(component);
+        });
+
+    }
+})
