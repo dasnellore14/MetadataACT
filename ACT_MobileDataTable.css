@@ -1,0 +1,24 @@
+/**
+ * Created by adamsm on 7/17/2019.
+ */
+
+.THIS {
+}
+
+.THIS .textLabel {
+    font-weight: bold;
+}
+
+.THIS .textValue {
+    font-weight: normal;
+}
+
+.THIS .tileItem {
+    border: 1px solid black;
+    border-radius: .25rem;
+    padding: 8px;
+}
+
+.THIS .slds-table_header-fixed_container {
+    width : max-content !important;
+}
