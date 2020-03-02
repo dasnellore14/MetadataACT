@@ -1,0 +1,37 @@
+/**
+ * Created by adamsm on 7/15/2019.
+ */
+
+({
+    sortBy: function (field, reverse, primer) {
+        var key = primer ? function(x) {return primer(x[field])} : function(x) {return x[field]};
+
+        reverse = !reverse ? 1 : -1;
+
+        return function (a, b) {
+            return a = key(a), b = key(b), reverse * ((a > b) - (b > a));
+        }
+    },
+
+    sortData: function (component, fieldName, sortDirection, helper) {
+        var objData = component.get('v.data');
+        var reverse = sortDirection !== 'asc';
+        var sortFieldName;
+
+        // Swap out the field name, if necessary
+        switch (fieldName) {
+            case 'ContactLink':
+                sortFieldName = 'ContactName';
+                break;
+            case 'OrganizationLink':
+                sortFieldName = 'Organization';
+                break;
+            default:
+                sortFieldName = fieldName;
+        }
+
+        helper.showConsole(component, 'sort, ' + sortFieldName + ',' + reverse);
+        objData.sort(helper.sortBy(sortFieldName, reverse));
+        component.set('v.data', objData);
+    },
+});
