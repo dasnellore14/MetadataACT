@@ -1,0 +1,167 @@
+@isTest
+public class ACT_ManageMyAccessControllerTest {
+    public static id CA_RECORDTYPE_ID = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+    @testSetup static void setup() {
+        //create test data
+        User CommunityUser =ACT_IDP_AddUsersControllerTest.createCommunityUser(true);
+
+        //Create Account.
+        Account objAccount = new Account(Name='TestAcc1', eMetric_Org_Type__c='B', RecordTypeId =CA_RECORDTYPE_ID);
+        insert objAccount;
+
+
+        //Create Account.
+        Account objAccount1 = new Account(Name='TestAcc2', eMetric_Org_Type__c='S', RecordTypeId =CA_RECORDTYPE_ID);
+        insert objAccount1;
+
+        //Update User on Contact.
+        Contact objContact = [SELECT Id FROM Contact LIMIT 1];
+        objContact.User__c = CommunityUser.Id;
+        update objContact;
+
+        //Create Account Contact relation.
+        AccountContactRelation acr = new AccountContactRelation();
+        acr.Accountid = objAccount.id;
+        acr.Contactid = [SELECT Id FROM Contact LIMIT 1].id;
+        acr.Ed_Fi_Role__c = 'EDFI_TENANT_ADMIN';
+        acr.eMetrics_Role__c = 'Admin-Full';
+        acr.Status__c = 'Active';
+        acr.Success_Community_Role__c = 'Trusted Agent';
+        insert acr;
+
+
+        //Create Account Contact relation for state trusted agent
+        AccountContactRelation acr1 = new AccountContactRelation();
+        acr1.Accountid = objAccount1.id;
+        acr1.Contactid = [SELECT Id FROM Contact LIMIT 1].id;
+        acr1.eMetrics_Role__c = 'Admin-Full';
+        acr1.Status__c = 'Active';
+        acr1.Success_Community_Role__c = 'State Trusted Agent';
+        insert acr1;
+
+        //Create Access code.
+        Access_Code__c objAccessCode = new Access_Code__c();
+        objAccessCode.Access_Code__c = 'Test';
+        objAccessCode.District_Account__c = objAccount.id;
+        objAccessCode.Type__c = 'Trusted Agent';
+        objAccessCode.Uses_Remaining__c = 5;
+        insert objAccessCode;
+
+        //Create Access code for state trusted agent
+        Access_Code__c objAccessCode1 = new Access_Code__c();
+        objAccessCode1.Access_Code__c = 'Test1';
+        objAccessCode1.District_Account__c = objAccount1.id;
+        objAccessCode1.Type__c = 'State Trusted Agent';
+        objAccessCode1.Uses_Remaining__c = 5;
+        insert objAccessCode1;
+    }
+
+    /*
+* Method to test My Access functionality.
+*/
+    static testMethod void testMyAccess(){
+        User CommunityUser = [SELECT Id FROM User Where Email= 'communityuser@act.com'];
+        Account objAccount = [SELECT Id FROM Account WHERE Name = 'TestAcc1' LIMIT 1];
+        Account objAccount1 = [SELECT Id,eMetric_Org_Type__c FROM Account WHERE Name = 'TestAcc2' LIMIT 1];
+
+        system.runAs(CommunityUser){
+            ACT_ManageMyAccessController.fetchMyOrganizationAccess(JSON.serialize(objAccount));
+            ACT_ManageMyAccessController.fetchMyOrganizationAccess(JSON.serialize(objAccount1));
+        }
+    }
+
+    /*
+* Method to test Validate Access functionality.
+*/
+    static testMethod void testAccessCodeValidation(){
+        User CommunityUser = [SELECT Id FROM User Where Email= 'communityuser@act.com'];
+        Account objAccount = [SELECT Id FROM Account WHERE Name = 'TestAcc1' LIMIT 1];
+        Account objAccount1 = [SELECT Id,eMetric_Org_Type__c FROM Account WHERE Name = 'TestAcc2' LIMIT 1];
+
+        system.runAs(CommunityUser){
+            ACT_ManageMyAccessController.validateAccesCodeAndAccount('Test',objAccount.Id);
+            ACT_ManageMyAccessController.validateAccesCodeAndAccount('Test1',objAccount1.Id);
+
+        }
+    }
+
+    /*
+    * Method to test Access updation functionality.
+    */
+    static testMethod void testAccessLevelUpdation(){
+        User CommunityUser = [SELECT Id FROM User Where Email= 'communityuser@act.com'];
+        Account objAccount = [SELECT Id FROM Account WHERE Name = 'TestAcc1' LIMIT 1];
+        String strAccessCodeId = [SELECT Id FROM Access_Code__c LIMIT 1].Id;
+        system.runAs(CommunityUser){
+            JSONGenerator objJSON = JSON.createGenerator(true);
+            objJSON.writeStartObject();
+            objJSON.writeStringField('accountId', objAccount.Id);
+            objJSON.writeStringField('accessToken', 'Test');
+            objJSON.writeStringField('accessLevel', 'Trusted Agent');
+            objJSON.writeStringField('accessCodeId', strAccessCodeId);
+            objJSON.writeNumberField('accessCodeUsage', 5);
+            objJSON.writeStringField('validateResponse', 'Valid');
+            objJSON.writeEndObject();
+            try{
+                ACT_ManageMyAccessController.applyRequestedPermissions(objJSON.getAsString());
+            }catch(exception exp){
+                system.debug(exp);
+            }
+
+        }
+    }
+
+    /*
+    * Method to test Access updation functionality.
+    */
+    static testMethod void testRequestMoreAccess(){
+        User CommunityUser = [SELECT Id FROM User Where Email= 'communityuser@act.com'];
+        Account objAccount = [SELECT Id FROM Account WHERE Name = 'TestAcc1' LIMIT 1];
+        String strAccessCodeId = [SELECT Id FROM Access_Code__c LIMIT 1].Id;
+
+        system.runAs(CommunityUser){
+
+            JSONGenerator objJSON = JSON.createGenerator(true);
+            objJSON.writeStartObject();
+            objJSON.writeStringField('AccountId', objAccount.Id);
+            objJSON.writeStringField('AccessLevel', 'Test');
+            objJSON.writeStringField('TAALevel', 'true');
+            objJSON.writeStringField('EdFiAccess', 'true');
+            objJSON.writeStringField('UserEmails', 'communityuser@act.com');
+            objJSON.writeStringField('lstNewUsers', 'communityuser@act.com');
+            objJSON.writeEndObject();
+            try{
+                ACT_ManageMyAccessController.handleRequestedAccess(objJSON.getAsString());
+            }catch(exception exp){
+                system.debug(exp);
+            }
+
+        }
+    }
+    /*
+    * Method to test sendEmailWhenUsingAccessCodeForSTA functionality.
+    */
+    static testMethod void testSendEmailWhenUsingAccessCodeForSTA(){
+
+        Account objAccount1 = [SELECT Id,Name FROM Account WHERE Name = 'TestAcc2' LIMIT 1];
+        string Accname = objAccount1.Id;
+
+        Contact c = new Contact(LastName ='TestContactLast1', AccountId = objAccount1.Id);
+        insert c;
+
+        Profile CommunityProfile = [SELECT Id FROM Profile WHERE Name =: ACT_CommunityConstants.Community_Profile];
+        User CommunityUser2 = new User(Alias = 'comer', Email='communitysuser@act.com',
+                EmailEncodingKey='UTF-8', LastName='TestUserLast12',FirstName='TestUserFirst1', LanguageLocaleKey='en_US',
+                LocaleSidKey='en_US',CompanyName='ABC inc',State='IA', ProfileId = CommunityProfile.Id, ContactId = c.Id,
+                TimeZoneSidKey='America/Chicago', Title='TestUser1',phone='9880888888', UserName='coommunityuser1243454@act.com.act');
+
+        insert CommunityUser2;
+
+        List<Id> lcIds = new List<Id>{c.Id};
+
+        system.runAs(CommunityUser2){
+            ACT_ManageMyAccessController.sendEmailWhenUsingAccessCodeForSTA(lcIds,Accname);
+        }
+    }
+}
