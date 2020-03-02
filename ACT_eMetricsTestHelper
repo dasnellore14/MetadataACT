@@ -1,0 +1,680 @@
+/**
+ * Created by adamsm on 1/31/2019.
+ */
+
+@IsTest
+public with sharing class ACT_eMetricsTestHelper {
+    public static void createAccountContactRelationships() {
+        // Get the contact
+        Contact thisContact = [SELECT Id FROM Contact WHERE LastName = 'TestContactLast'][0];
+
+        // Enter the contact id
+        Id ContactId = thisContact.id;
+
+        // Create account/contact relationship records
+        list<AccountContactRelation> lstACR = new list<AccountContactRelation>();
+
+        // Get the district accounts
+        set<string> setDistricts = new set<string>{'011111', '022222', '033333', '044444', '055555', '066666'};
+
+        list<Account> lstDistricts = [SELECT Id, MDM_ID__c FROM Account WHERE MDM_ID__c in : setDistricts];
+
+        // Set existing schools
+        set<string> setSchools = new set<string>{'001112', '002224', '003336', '004448', '055550'};
+
+        // Get the non-district schools
+        list<Account> lstNDSchools = [SELECT Id, MDM_ID__c FROM Account WHERE MDM_ID__c in : setSchools];
+
+        // Create the district records
+        for (Account thisA : lstDistricts) {
+            AccountContactRelation thisACR = new AccountContactRelation();
+
+            thisACR.AccountID = thisA.Id;
+            thisACR.ContactId = ContactID;
+            thisACR.Ed_Fi_Role__c = 'EDFI_TENANT_ADMIN';
+            thisACR.eMetrics_Role__c = 'Admin-Full';
+            thisACR.Status__c = 'Active';
+            thisACR.Success_Community_Role__c = 'Trusted Agent';
+            thisACR.TAA_Role__c = 'ACCTAC';
+
+            lstACR.add(thisACR);
+        }
+
+        // Create the school records
+        for (Account thisA : lstNDSchools) {
+            AccountContactRelation thisACR = new AccountContactRelation();
+
+            thisACR.AccountID = thisA.Id;
+            thisACR.ContactId = ContactID;
+            thisACR.eMetrics_Role__c = 'Normal-Limited';
+            thisACR.Status__c = 'Active';
+            thisACR.Success_Community_Role__c = 'Trusted Agent';
+
+            lstACR.add(thisACR);
+        }
+
+        // Add the account contact relationship records
+        if (lstACR.size() > 0) {
+            insert lstACR;
+        }
+    }
+
+    public static void createDistricts() {
+        // Get the record type for Customer Account
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        // Get the states for mapping
+        list<Account> lstStates = [SELECT Id, MDM_ID__c FROM Account WHERE eMetric_Org_Type__c = 'S'];
+
+        map<string, id> mapStates = new map<string, id>();
+
+        // Map the states
+        for (Account thisA : lstStates) {
+            mapStates.put(thisA.MDM_ID__c, thisA.Id);
+        }
+
+        // Create the districts
+        list<Account> lstDistricts = new list<Account>();
+
+        // Alabama
+        Account actAlabama = new Account();
+
+        actAlabama.Name = 'District - Alabama';
+        actAlabama.Active__c = true;
+        actAlabama.eMetric_Org_Type__c = 'D';
+        actAlabama.Historical_MDM_ID__c = '011111,0111112838,11111';
+        actAlabama.Industry = 'Education';
+        actAlabama.MDM_ID__c = '011111';
+        actAlabama.ParentID = mapStates.get('111111');
+        actAlabama.RecordTypeId = idCA;
+        actAlabama.Sub_Category__c = 'DISTRICT';
+
+        lstDistricts.add(actAlabama);
+
+        // North Carolina
+        Account actNC = new Account();
+
+        actNC.Name = 'District - North Carolina';
+        actNC.Active__c = true;
+        actNC.eMetric_Org_Type__c = 'D';
+        actNC.Historical_MDM_ID__c = '022222,02222232901,22222';
+        actNC.Industry = 'Education';
+        actNC.MDM_ID__c = '022222';
+        actNC.ParentID = mapStates.get('222222');
+        actNC.RecordTypeId = idCA;
+        actNC.Sub_Category__c = 'DISTRICT';
+
+        lstDistricts.add(actNC);
+
+        // Ohio
+        Account actOhio = new Account();
+
+        actOhio.Name = 'District - Ohio';
+        actOhio.Active__c = true;
+        actOhio.eMetric_Org_Type__c = 'D';
+        actOhio.Historical_MDM_ID__c = '033333,03333311537,33333';
+        actOhio.Industry = 'Education';
+        actOhio.MDM_ID__c = '033333';
+        actOhio.ParentID = mapStates.get('333333');
+        actOhio.RecordTypeId = idCA;
+        actOhio.Sub_Category__c = 'DISTRICT';
+
+        lstDistricts.add(actOhio);
+
+        // Montana
+        Account actMontana = new Account();
+
+        actMontana.Name = 'District - Montana';
+        actMontana.Active__c = true;
+        actMontana.eMetric_Org_Type__c = 'D';
+        actMontana.Historical_MDM_ID__c = '044444,0444447789,44444';
+        actMontana.Industry = 'Education';
+        actMontana.MDM_ID__c = '044444';
+        actMontana.ParentID = mapStates.get('444444');
+        actMontana.RecordTypeId = idCA;
+        actMontana.Sub_Category__c = 'DISTRICT';
+
+        lstDistricts.add(actMontana);
+
+        // Utah
+        Account actUtah = new Account();
+
+        actUtah.Name = 'District - Utah';
+        actUtah.Active__c = true;
+        actUtah.eMetric_Org_Type__c = 'D';
+        actUtah.Historical_MDM_ID__c = '055555,0555559967,55555';
+        actUtah.Industry = 'Education';
+        actUtah.MDM_ID__c = '055555';
+        actUtah.ParentID = mapStates.get('555555');
+        actUtah.RecordTypeId = idCA;
+        actUtah.Sub_Category__c = 'DISTRICT';
+
+        lstDistricts.add(actUtah);
+
+        // Save the districts
+        if (lstDistricts.size() > 0) {
+            insert lstDistricts;
+            system.debug(lstDistricts.size() + ' Districts Created.');
+        }
+
+        // Enter the contact id
+        Id ContactId = [SELECT Id FROM Contact WHERE LastName = 'TestContactLast'][0].id;
+
+        // Create the hierarchy approval records
+        list<Hierarchy_Approval__c> lstHA = new list<Hierarchy_Approval__c>();
+
+        for (Account thisA : lstDistricts) {
+            Hierarchy_Approval__c thisHA = new Hierarchy_Approval__c();
+
+            thisHA.District_Account__c = thisA.Id;
+            thisHA.Status__c = 'Approved';
+            thisHA.Approved_By__c = ContactId;
+            thisHA.Approved_Date_Time__c = DateTime.now();
+
+            lstHA.add(thisHA);
+        }
+
+        insert lstHA;
+        system.debug(lstHA.size() + ' Hierarchy Approval records created.');
+
+        // Go back and set up the HA records on the district accounts
+        for (Account actDistrict : lstDistricts) {
+            for (Hierarchy_Approval__c thisHA : lstHA) {
+                if (thisHA.District_Account__c == actDistrict.Id) {
+                    actDistrict.Current_Year_Hierarchy__c = thisHA.Id;
+                    system.debug('District ' + actDistrict.Id + ', HA = ' + thisHA.id);
+                }
+            }
+        }
+
+        update lstDistricts;
+    }
+
+    public static void createDistrictSchools() {
+        // Get the record type for Customer Account
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        // Get the districts for mapping
+        list<Account> lstDistricts = [SELECT Id, MDM_ID__c FROM Account WHERE eMetric_Org_Type__c = 'D'];
+
+        map<string, id> mapDistricts = new map<string, id>();
+
+        // Map the districts
+        for (Account thisA : lstDistricts) {
+            mapDistricts.put(thisA.MDM_ID__c, thisA.Id);
+        }
+
+        // Create the district schools
+        list<Account> lstSchools = new list<Account>();
+
+        // Alabama
+        Account actAlabama = new Account();
+
+        actAlabama.Name = 'District School - Alabama';
+        actAlabama.Active__c = true;
+        actAlabama.eMetric_Org_Type__c = 'B';
+        actAlabama.Historical_MDM_ID__c = '001113,001113123,1113';
+        actAlabama.Industry = 'Education';
+        actAlabama.MDM_ID__c = '001113';
+        actAlabama.ParentID = mapDistricts.get('011111');
+        actAlabama.RecordTypeId = idCA;
+        actAlabama.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actAlabama);
+
+        // North Carolina
+        Account actNC = new Account();
+
+        actNC.Name = 'District School - North Carolina';
+        actNC.Active__c = true;
+        actNC.eMetric_Org_Type__c = 'B';
+        actNC.Historical_MDM_ID__c = '002225,002225331,2225';
+        actNC.Industry = 'Education';
+        actNC.MDM_ID__c = '002225';
+        actNC.ParentID = mapDistricts.get('022222');
+        actNC.RecordTypeId = idCA;
+        actNC.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actNC);
+
+        // Ohio
+        Account actOhio = new Account();
+
+        actOhio.Name = 'District School - Ohio';
+        actOhio.Active__c = true;
+        actOhio.eMetric_Org_Type__c = 'B';
+        actOhio.Historical_MDM_ID__c = '003337,0033370938,3337';
+        actOhio.Industry = 'Education';
+        actOhio.MDM_ID__c = '003337';
+        actOhio.ParentID = mapDistricts.get('033333');
+        actOhio.RecordTypeId = idCA;
+        actOhio.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actOhio);
+
+        // Montana
+        Account actMontana = new Account();
+
+        actMontana.Name = 'District School - Montana';
+        actMontana.Active__c = true;
+        actMontana.eMetric_Org_Type__c = 'B';
+        actMontana.Historical_MDM_ID__c = '004449,004449354,4449';
+        actMontana.Industry = 'Education';
+        actMontana.MDM_ID__c = '004449';
+        actMontana.ParentID = mapDistricts.get('044444');
+        actMontana.RecordTypeId = idCA;
+        actMontana.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actMontana);
+
+        // Utah
+        Account actUtah = new Account();
+
+        actUtah.Name = 'District School - Utah';
+        actUtah.Active__c = true;
+        actUtah.eMetric_Org_Type__c = 'B';
+        actUtah.Historical_MDM_ID__c = '055551,05555133829,55551';
+        actUtah.Industry = 'Education';
+        actUtah.MDM_ID__c = '055551';
+        actUtah.ParentID = mapDistricts.get('055555');
+        actUtah.RecordTypeId = idCA;
+        actUtah.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actUtah);
+
+        // Save the schools
+        if (lstSchools.size() > 0) {
+            insert lstSchools;
+            system.debug(lstSchools.size() + ' District Schools Created.');
+        }
+    }
+
+    public static void createIDPAccount() {
+        // Get the record type for Customer Account
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        // Insert the IDP
+        Account actIDP = new Account();
+
+        actIDP.Name = 'IDP REGISTRATION';
+        actIDP.Active__c = true;
+        actIDP.Industry = 'Education';
+        actIDP.RecordTypeId = idCA;
+
+        insert actIDP;
+    }
+
+    public static void createNonDistrictSchools() {
+        // Get the record type for Customer Account
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        // Get the states for mapping
+        list<Account> lstStates = [SELECT Id, MDM_ID__c FROM Account WHERE eMetric_Org_Type__c = 'S'];
+
+        map<string, id> mapStates = new map<string, id>();
+
+        // Map the states
+        for (Account thisA : lstStates) {
+            mapStates.put(thisA.MDM_ID__c, thisA.Id);
+        }
+
+        // Create the non-district schools
+        list<Account> lstSchools = new list<Account>();
+
+        // Alabama
+        Account actAlabama = new Account();
+
+        actAlabama.Name = 'Non-district School - Alabama';
+        actAlabama.Active__c = true;
+        actAlabama.eMetric_Org_Type__c = 'B';
+        actAlabama.Historical_MDM_ID__c = '001112,00111239393,1112';
+        actAlabama.Industry = 'Education';
+        actAlabama.MDM_ID__c = '001112';
+        actAlabama.ParentID = mapStates.get('111111');
+        actAlabama.RecordTypeId = idCA;
+        actAlabama.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actAlabama);
+
+        // North Carolina
+        Account actNC = new Account();
+
+        actNC.Name = 'Non-district School - North Carolina';
+        actNC.Active__c = true;
+        actNC.eMetric_Org_Type__c = 'B';
+        actNC.Historical_MDM_ID__c = '002224,0022244727,2224';
+        actNC.Industry = 'Education';
+        actNC.MDM_ID__c = '002224';
+        actNC.ParentID = mapStates.get('222222');
+        actNC.RecordTypeId = idCA;
+        actNC.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actNC);
+
+        // Ohio
+        Account actOhio = new Account();
+
+        actOhio.Name = 'Non-district School - Ohio';
+        actOhio.Active__c = true;
+        actOhio.eMetric_Org_Type__c = 'B';
+        actOhio.Historical_MDM_ID__c = '003336,00333639393,3336';
+        actOhio.Industry = 'Education';
+        actOhio.MDM_ID__c = '003336';
+        actOhio.ParentID = mapStates.get('333333');
+        actOhio.RecordTypeId = idCA;
+        actOhio.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actOhio);
+
+        // Montana
+        Account actMontana = new Account();
+
+        actMontana.Name = 'Non-district School - Montana';
+        actMontana.Active__c = true;
+        actMontana.eMetric_Org_Type__c = 'B';
+        actMontana.Historical_MDM_ID__c = '004448,0044483331,4448';
+        actMontana.Industry = 'Education';
+        actMontana.MDM_ID__c = '004448';
+        actMontana.ParentID = mapStates.get('444444');
+        actMontana.RecordTypeId = idCA;
+        actMontana.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actMontana);
+
+        // Utah
+        Account actUtah = new Account();
+
+        actUtah.Name = 'Non-district School - Utah';
+        actUtah.Active__c = true;
+        actUtah.eMetric_Org_Type__c = 'B';
+        actUtah.Historical_MDM_ID__c = '055550,05555078909,55550';
+        actUtah.Industry = 'Education';
+        actUtah.MDM_ID__c = '055550';
+        actUtah.ParentID = mapStates.get('555555');
+        actUtah.RecordTypeId = idCA;
+        actUtah.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actUtah);
+
+        // Save the schools
+        if (lstSchools.size() > 0) {
+            insert lstSchools;
+            system.debug(lstSchools.size() + ' Non-district Schools Created.');
+        }
+
+        // Create hierarchy approval records for all the non-district schools
+        list<Hierarchy_Approval__c> lstHA = new list<Hierarchy_Approval__c>();
+
+        // Enter the contact id
+        Id ContactId = [SELECT Id FROM Contact WHERE LastName = 'TestContactLast'][0].id;
+
+        for (Account thisA : lstSchools) {
+            Hierarchy_Approval__c thisHA = new Hierarchy_Approval__c();
+
+            thisHA.District_Account__c = thisA.Id;
+            thisHA.Status__c = 'Approved';
+            thisHA.Approved_By__c = ContactId;
+            thisHA.Approved_Date_Time__c = DateTime.now();
+
+            lstHA.add(thisHA);
+        }
+
+        if (lstHA.size() > 0) {
+            insert lstHA;
+            system.debug(lstHA.size() + ' Hierarchy Approval records created.');
+        }
+
+        // Go back and set up the HA records on the accounts
+        for (Account actSchool : lstSchools) {
+            for (Hierarchy_Approval__c thisHA : lstHA) {
+                if (thisHA.District_Account__c == actSchool.Id) {
+                    actSchool.Current_Year_Hierarchy__c = thisHA.Id;
+                }
+            }
+        }
+
+        update lstSchools;
+    }
+
+    public static void createStates() {
+        // Get the record type for Customer Account
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        // Create the states
+        list<Account> lstStates = new list<Account>();
+
+        // Alabama
+        Account actAlabama = new Account();
+
+        actAlabama.Name = 'State - Alabama';
+        actAlabama.Active__c = true;
+        actAlabama.eMetric_Org_Type__c = 'S';
+        actAlabama.Industry = 'Government';
+        actAlabama.MDM_ID__c = '111111';
+        actAlabama.RecordTypeId = idCA;
+        actAlabama.Sub_Category__c = 'DEPARTMENT OF EDUCATION';
+
+        lstStates.add(actAlabama);
+
+        // North Carolina
+        Account actNC = new Account();
+
+        actNC.Name = 'State - North Carolina';
+        actNC.Active__c = true;
+        actNC.eMetric_Org_Type__c = 'S';
+        actNC.Industry = 'Government';
+        actNC.MDM_ID__c = '222222';
+        actNC.RecordTypeId = idCA;
+        actNC.Sub_Category__c = 'DEPARTMENT OF EDUCATION';
+
+        lstStates.add(actNC);
+
+        // Ohio
+        Account actOhio = new Account();
+
+        actOhio.Name = 'State - Ohio';
+        actOhio.Active__c = true;
+        actOhio.eMetric_Org_Type__c = 'S';
+        actOhio.Industry = 'Government';
+        actOhio.MDM_ID__c = '333333';
+        actOhio.RecordTypeId = idCA;
+        actOhio.Sub_Category__c = 'DEPARTMENT OF EDUCATION';
+
+        lstStates.add(actOhio);
+
+        // Montana
+        Account actMontana = new Account();
+
+        actMontana.Name = 'State - Montana';
+        actMontana.Active__c = true;
+        actMontana.eMetric_Org_Type__c = 'S';
+        actMontana.Industry = 'Government';
+        actMontana.MDM_ID__c = '444444';
+        actMontana.RecordTypeId = idCA;
+        actMontana.Sub_Category__c = 'DEPARTMENT OF EDUCATION';
+
+        lstStates.add(actMontana);
+
+        // Utah
+        Account actUtah = new Account();
+
+        actUtah.Name = 'State - Utah';
+        actUtah.Active__c = true;
+        actUtah.eMetric_Org_Type__c = 'S';
+        actUtah.Industry = 'Government';
+        actUtah.MDM_ID__c = '555555';
+        actUtah.RecordTypeId = idCA;
+        actUtah.Sub_Category__c = 'DEPARTMENT OF EDUCATION';
+
+        lstStates.add(actUtah);
+
+        // Save the states
+        if (lstStates.size() > 0) {
+            insert lstStates;
+        }
+    }
+
+    public static void createSubDistrict() {
+        // Get the record type for Customer Account
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        // Get the districts for mapping
+        list<Account> lstDistricts = [SELECT Id, MDM_ID__c FROM Account WHERE eMetric_Org_Type__c = 'D'];
+
+        map<string, id> mapDistricts = new map<string, id>();
+
+        // Map the Districts
+        for (Account thisA : lstDistricts) {
+            mapDistricts.put(thisA.MDM_ID__c, thisA.Id);
+        }
+
+        // Create the sub district
+        list<Account> lstSubDistricts = new list<Account>();
+
+        // Alabama
+        Account actAlabama = new Account();
+
+        actAlabama.Name = 'Subdistrict - Alabama';
+        actAlabama.Active__c = true;
+        actAlabama.eMetric_Org_Type__c = null;
+        actAlabama.Historical_MDM_ID__c = '011113,0111138578,11113';
+        actAlabama.Industry = 'Education';
+        actAlabama.MDM_ID__c = '011113';
+        actAlabama.ParentID = mapDistricts.get('011111');
+        actAlabama.RecordTypeId = idCA;
+        actAlabama.Sub_Category__c = 'SUBDISTRICT';
+
+        lstSubDistricts.add(actAlabama);
+
+        // Save the subdistricts
+        if (lstSubDistricts.size() > 0) {
+            insert lstSubDistricts;
+            system.debug(lstSubDistricts.size() + ' Subdistricts Created.');
+        }
+    }
+
+    public static void createSubdistrictSchool() {
+        // Get the record type for Customer Account
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        // Get the subdistrict for mapping
+        list<Account> lstSDistricts = [SELECT Id, MDM_ID__c FROM Account WHERE MDM_ID__c = '011113'];
+
+        map<string, id> mapSDistricts = new map<string, id>();
+
+        // Map the districts
+        for (Account thisA : lstSDistricts) {
+            mapSDistricts.put(thisA.MDM_ID__c, thisA.Id);
+        }
+
+        // Create the subdistrict school
+        list<Account> lstSchools = new list<Account>();
+
+        // Alabama
+        Account actAlabama = new Account();
+
+        actAlabama.Name = 'SubDistrict School - Alabama';
+        actAlabama.Active__c = true;
+        actAlabama.eMetric_Org_Type__c = 'B';
+        actAlabama.Historical_MDM_ID__c = '001133,00113331471,1133';
+        actAlabama.Industry = 'Education';
+        actAlabama.MDM_ID__c = '001133';
+        actAlabama.ParentID = mapSDistricts.get('011113');
+        actAlabama.RecordTypeId = idCA;
+        actAlabama.Sub_Category__c = 'COMBINED';
+
+        lstSchools.add(actAlabama);
+
+        // Save the school
+        if (lstSchools.size() > 0) {
+            insert lstSchools;
+            system.debug(lstSchools.size() + ' SubDistrict Schools Created.');
+        }
+    }
+
+    public static void createUser() {
+        Map <String,Schema.RecordTypeInfo> recordTypeMap = Account.sObjectType.getDescribe().getRecordTypeInfosByName();
+
+        Id devRecordTypeId;
+
+        if (recordTypeMap.containsKey('Customer Account')) {
+            devRecordTypeId = recordTypeMap.get('Customer Account').getRecordTypeId();
+        }
+
+        Account CommunityAccount = new Account(Name='Parent', RecordTypeId = devRecordTypeId);
+        insert CommunityAccount;
+
+        Contact CommunityContact = new Contact(LastName ='TestContactLast',FirstName = 'TestContactFirst', Title='Test Contact Title', phone='9999999999', email='communityuser@act.com',
+                MailingStreet='1254 Casement St',MailingCity='San Diego', MailingState='CA',MailingPostalCode='47893',MailingCountry='USA', AccountId = CommunityAccount.Id);
+        insert CommunityContact;
+
+        Profile CommunityProfile = [SELECT Id FROM Profile WHERE Name=: ACT_CommunityConstants.Community_Profile];
+
+        User CommunityUser = new User(Alias = 'comuser', Email='communityuser@act.com',
+                EmailEncodingKey='UTF-8', LastName='TestUserLast',FirstName='TestUserFirst', LanguageLocaleKey='en_US',
+                LocaleSidKey='en_US',CompanyName='ABC inc',State='IA', ProfileId = CommunityProfile.Id, ContactId = CommunityContact.Id,
+                TimeZoneSidKey='America/Chicago', Title='TestUser',phone='9888888888', UserName='TestUserName@act.org');
+        insert CommunityUser;
+
+        CommunityContact.user__c=CommunityUser.Id;
+        update CommunityContact;
+
+        Hierarchy_Approval__c hierarchy=new Hierarchy_Approval__c(District_Account__c=CommunityAccount.Id, Status__c='Approval Required');
+        insert hierarchy;
+
+        // Create 2 more users, for additional testing
+        Contact CommunityContact2 = new Contact(LastName ='TestCL2',FirstName = 'TestCF2', Title='Test Contact Title', phone='8889999999', email='communityuser2@act.com',
+                MailingStreet='1254 Casement St',MailingCity='San Diego', MailingState='CA',MailingPostalCode='47893',MailingCountry='USA', AccountId = CommunityAccount.Id);
+
+        insert CommunityContact2;
+
+        User CommunityUser2 = new User(Alias = 'comuser2', Email='communityuser2@act.com',
+                EmailEncodingKey='UTF-8', LastName='TestUserLast2',FirstName='TestUserFirst2', LanguageLocaleKey='en_US',
+                LocaleSidKey='en_US',CompanyName='ABC inc',State='IA', ProfileId = CommunityProfile.Id, ContactId = CommunityContact2.Id,
+                TimeZoneSidKey='America/Chicago', Title='TestUser',phone='9888888888', UserName='TestUserName2@act.org');
+        insert CommunityUser2;
+
+        CommunityContact2.user__c=CommunityUser2.Id;
+        update CommunityContact2;
+
+        Contact CommunityContact3 = new Contact(LastName ='TestDude3',FirstName = 'TestDude3', Title='Test Contact Title', phone='7779999999', email='communityuser3@act.com',
+                MailingStreet='1254 Casement St',MailingCity='San Diego', MailingState='CA',MailingPostalCode='47893',MailingCountry='USA', AccountId = CommunityAccount.Id);
+
+        insert CommunityContact3;
+
+        User CommunityUser3 = new User(Alias = 'comuser3', Email='communityuser3@act.com',
+                EmailEncodingKey='UTF-8', LastName='TestUserLast3',FirstName='TestUserFirst3', LanguageLocaleKey='en_US',
+                LocaleSidKey='en_US',CompanyName='ABC inc',State='IA', ProfileId = CommunityProfile.Id, ContactId = CommunityContact3.Id,
+                TimeZoneSidKey='America/Chicago', Title='TestUser',phone='9888888888', UserName='TestUserName3@act.org');
+        insert CommunityUser3;
+
+        CommunityContact3.user__c=CommunityUser3.Id;
+        update CommunityContact3;
+    }
+
+    public testMethod static void CreateObjects() {
+        // First create the user (along with their contact record)
+        createUser();
+
+        // Then the states
+        createStates();
+
+        // Then the districts, and the hierarchy approval records for those districts
+        createDistricts();
+
+        // Create the sub district
+        createSubDistrict();
+
+        // Then the district schools
+        createDistrictSchools();
+
+        // Then the non-district schools, and the hierarchy approval records for those schools
+        createNonDistrictSchools();
+
+        // Then the sub district school
+        createSubDistrictSchool();
+
+        // Now create the ACRs for the test contact
+        createAccountContactRelationships();
+    }
+}
