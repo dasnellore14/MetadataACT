@@ -1,0 +1,142 @@
+/**
+ * Created by adamsm on 5/9/2019.
+ */
+
+@isTest
+public with sharing class ACT_ManageUsersController_Test {
+    @testSetup static void setup() {
+        // Create the user
+        ACT_eMetricsTestHelper.createUser();
+
+        // Create the test states
+        ACT_eMetricsTestHelper.createStates();
+
+        // Create the test districts
+        ACT_eMetricsTestHelper.createDistricts();
+
+        // Create the district schools
+        ACT_eMetricsTestHelper.createDistrictSchools();
+
+        // Create the non-district schools
+        ACT_eMetricsTestHelper.createNonDistrictSchools();
+
+        // Create the account contact relationships
+        ACT_eMetricsTestHelper.createAccountContactRelationships();
+
+        // Create a hierarchy change record
+        list<Hierarchy_Change__c> lstHC = new list<Hierarchy_Change__c>();
+
+        Hierarchy_Change__c thisHC = new Hierarchy_Change__c();
+
+        thisHC.Account__c = [SELECT Id FROM Account WHERE Name = 'District - Alabama'][0].id;
+        thisHC.Type__c = 'Parent Change';
+        thisHC.Old_Value__c = 'Old Value';
+        thisHC.New_Value__c = 'New Value';
+        thisHC.Timestamp__c = Datetime.now();
+
+        insert thisHC;
+
+        // Get the user
+        User thisU = [SELECT Id, ContactId FROM User WHERE Email='communityuser@act.com'];
+
+        // Create an couple access records
+        Access__c newAccess = new Access__c();
+
+        newAccess.Account__c = thisHC.Account__c;
+        newAccess.Community_Contact__c = thisU.ContactId;
+        newAccess.Email_Address__c = 'communityuser@act.com';
+        newAccess.eMetrics_Role__c = 'Admin-Full';
+        newAccess.Status__c = 'Open';
+        newAccess.Type__c = 'Request';
+
+        insert newAccess;
+
+        newAccess = new Access__c();
+
+        newAccess.Account__c = thisHC.Account__c;
+        newAccess.Community_Contact__c = thisU.ContactId;
+        newAccess.Email_Address__c = 'communityuser@act.com';
+        newAccess.eMetrics_Role__c = 'Admin-Full';
+        newAccess.Status__c = 'Open';
+        newAccess.Type__c = 'Grant';
+
+        insert newAccess;
+
+        // Create an acr for the current user
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(thisHC.Account__c, new set<id>{thisU.ContactId}, 'Trusted Agent', 'Admin-Full', null, 'TAA Coordinator', null, null, null, null, null);
+    }
+
+    @isTest
+    public static void testController() {
+        // Get the user
+        boolean blnTest;
+        User thisU = [SELECT Id, ContactId FROM User WHERE Email='communityuser@act.com'];
+
+        // Get the access records to process
+        Access__c accG = [SELECT Id FROM Access__c WHERE Type__c = 'Grant'];
+        Access__c accR = [SELECT Id FROM Access__c WHERE Type__c = 'Request'];
+
+        // Load ACR Records
+        ACT_ManageUsersController.loadACRRecords(thisU.ContactId);
+
+        test.startTest();
+
+        System.runAs(thisU){
+            ACT_ManageUsersController.PageInitialize objPI = ACT_ManageUsersController.intitializePage();
+
+            ACT_ManageUsersController.AccessRecordsWrapper ARWTest = ACT_ManageUsersController.loadAccessRecords('Accepted Invitations', 10);
+            ARWTest = ACT_ManageUsersController.loadAccessRecords('Approved Requests', 10);
+            ARWTest = ACT_ManageUsersController.loadAccessRecords('Cancelled Invitations', 10);
+            ARWTest = ACT_ManageUsersController.loadAccessRecords('Expired Invitations', 10);
+            ARWTest = ACT_ManageUsersController.loadAccessRecords('Open Invitations', 10);
+            ARWTest = ACT_ManageUsersController.loadAccessRecords('Open Access Requests', 10);
+            ARWTest = ACT_ManageUsersController.loadAccessRecords('Rejected Requests', 10);
+
+            blnTest = ACT_ManageUsersController.processAccessRecords(accG.Id, 'Extend', '');
+            blnTest = ACT_ManageUsersController.processAccessRecords(accG.Id, 'Cancel', '');
+
+            blnTest = ACT_ManageUsersController.processAccessRecords(accR.Id, 'Approve', 'View Contract Deliverables');
+            blnTest = ACT_ManageUsersController.processAccessRecords(accR.Id, 'Reject', '');
+        }
+    }
+
+    @isTest
+    public static void testAddAccess() {
+        // Get the user
+        boolean blnTest;
+        User thisU = [SELECT Id, ContactId FROM User WHERE Email='communityuser@act.com'];
+
+        System.runAs(thisU){
+            ACT_ManageUsersController.AddAccessRequest AARTest = new ACT_ManageUsersController.AddAccessRequest();
+
+            AARTest.AccessLevel = 'Trusted Agent';
+            AARTest.AccountId = [SELECT Id FROM Account WHERE MDM_ID__c = '011111'].Id;
+            AARTest.EdFiAccess = 'true';
+            AARTest.TAALevel = 'true';
+            AARTest.UserEmails = 'mark@markymakdkdue.com';
+
+            ACT_ManageUsersController.processAddAccess(JSON.serialize(AARTest));
+        }
+    }
+    @isTest
+    public static void testRevokeAccess(){
+
+        User thisU = [SELECT Id, ContactId FROM User WHERE Email='communityuser@act.com'];
+
+
+        Account acc = [Select Id, Name from Account where Name = 'District - Alabama'];
+
+        AccountContactRelation acr = [Select Id from AccountContactRelation where AccountID =: acc.Id];
+
+
+        List<String> accConIds = new List<String>();
+        accConIds.add(acr.Id);
+        String accConJson = JSON.serialize(accConIds);
+        String selectedRevokeAccess = 'Selected Organisation and organisations below in hirarchy';
+
+        ACT_ManageUsersController.loadACRRecordsOnRevokeAction(acc.id);
+        ACT_ManageUsersController.processRevokeAccessRequest(accConJson,acc.id,selectedRevokeAccess);
+
+
+    }
+}
