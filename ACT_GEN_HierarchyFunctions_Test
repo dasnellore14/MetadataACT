@@ -1,0 +1,1472 @@
+/**
+ * Created by adamsm on 2/13/2019.
+ */
+
+@isTest
+public with sharing class ACT_GEN_HierarchyFunctions_Test {
+    @testSetup static void setup() {
+
+        ACT_eMetricsTestHelper.createUser();
+
+        // Create the test states
+        ACT_eMetricsTestHelper.createStates();
+
+        // Create the test districts
+        ACT_eMetricsTestHelper.createDistricts();
+
+        // Create test subdistrict
+        ACT_eMetricsTestHelper.createSubDistrict();
+
+        // Create the district schools
+        ACT_eMetricsTestHelper.createDistrictSchools();
+
+        // Create the non-district schools
+        ACT_eMetricsTestHelper.createNonDistrictSchools();
+
+        // Create a sub district school
+        ACT_eMetricsTestHelper.createSubdistrictSchool();
+
+        // Create the account contact relationships
+        ACT_eMetricsTestHelper.createAccountContactRelationships();
+    }
+
+    @isTest
+    private static void testDeactivateUsers() {
+        // Get the test user
+        User thisUser = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.deactivateUsers(new Set<Id>{thisUser.Id});
+    }
+
+    @isTest
+    private static void testgetAccountIdToApprovedMap() {
+        list<Account> lstAccounts = [
+                SELECT
+                        Id,
+                        Name,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c in ('111111', '011111', '001112', '001113')
+        ];
+
+        set<id> setA = new set<id>();
+
+        for (Account thisA : lstAccounts) {
+            setA.add(thisA.Id);
+        }
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToApprovedMap(setA);
+    }
+
+    @isTest
+    public static void testgetAccountIdToApprovalNeededMap() {
+        list<Account> lstAccounts = [
+                SELECT
+                        Id,
+                        Name,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c in ('111111', '011111', '001112', '001113')
+        ];
+
+        // Map the test accounts
+        map<id, Account> mapAccount = new map<id, Account>(lstAccounts);
+
+        // Get the map needing approval (out of the box, none should need it), don't limit the return to just those needing approval
+        map<id, map<integer, boolean>> mapA2A = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToApprovalNeededMap(mapAccount.keySet(), false);
+
+        // Verify the HA approval records are all false
+        for (Id idAccount : mapA2A.keySet()) {
+            map<integer, boolean> mapHA = mapA2A.get(idAccount);
+
+            for (integer thisAY : mapHA.keySet()) {
+                System.assertEquals(mapHA.get(thisAY), false);
+            }
+        }
+
+        // Change the Alabama District HA record, by first getting all the HA records
+        map<id, map<integer, Hierarchy_Approval__c>> mapA2HARecords = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToHierarchyApprovalMap(mapAccount.keySet());
+
+        // Loop through to find the alabama district HA record
+        list<Hierarchy_Approval__c> lstEditHA = new list<Hierarchy_Approval__c>();
+
+        for (id thisId : mapA2HARecords.keySet()) {
+            map<integer, Hierarchy_Approval__c> thisHAs = mapA2HARecords.get(thisID);
+
+            if (thisHAs != null) {
+                Account thisAccount = mapAccount.get(thisId);
+
+                if (thisAccount.Name == 'District - Alabama') {
+                    for (integer thisAY : thisHAs.keySet()) {
+                        Hierarchy_Approval__c thisHA = thisHAs.get(thisAY);
+
+                        thisHA.Status__c = 'Approval Required';
+                        lstEditHA.add(thisHA);
+                    }
+                }
+            }
+        }
+
+        update lstEditHA;
+
+        // Get the map again
+        mapA2A = ACT_GEN_HierarchyFunctions.getAccountIdToApprovalNeededMap(mapAccount.keySet(), false);
+
+        // Verify the HA approval needed records are true for only the district and district school for Alabama
+        for (Id idAccount : mapA2A.keySet()) {
+            Account thisAccount = mapAccount.get(idAccount);
+            map<integer, boolean> thisHAs = mapA2A.get(idAccount);
+
+            system.debug('This Account: ' + idAccount + ' = ' + thisAccount.Name);
+            System.assertEquals(thisHAs.get(0), (thisAccount.Name == 'District - Alabama' || thisAccount.Name == 'District School - Alabama'));
+        }
+        try{
+            ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToApprovalNeededMap(null, false);
+        }catch(Exception e){
+
+        }
+    }
+
+    @isTest
+    public static void testgetAccountIdToChildrenMap() {
+        // Get the Alabama State
+        Account actA = [SELECT Id FROM Account WHERE MDM_ID__c = '111111'];
+        set<id> setA = new set<id>{
+                actA.id
+        };
+
+        map<id, list<Account>> mapA2C = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToChildrenMap(setA, false, true);
+
+        list<Account> lstA = mapA2C.get(actA.Id);
+        System.assertEquals(lstA.size(), 5);
+
+        // Make a set out of the list
+        set<string> setCheck = new set<string>();
+
+        for (Account thisA : lstA) {
+            setCheck.add(thisA.MDM_ID__c);
+        }
+
+        System.assert(setCheck.contains('011111'));
+        System.assert(setCheck.contains('001112'));
+        System.assert(setCheck.contains('001113'));
+
+        try {
+            ACT_GEN_HierarchyFunctionsWithSharing.getAccountIdToChildrenMap(null, false, true);
+        }
+        catch(Exception e) {
+
+        }
+    }
+
+    @isTest
+    public static void testgetAccountIdToParentIdMap() {
+        list<Account> lstAccounts = [
+                SELECT
+                        Id,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c in ('111111', '011111', '001112', '001113', '011113', '001133')
+        ];
+
+        system.debug('lstAccounts.size() = ' + lstAccounts.size());
+
+        set<id> setAccounts = new set<id>();
+        map<string, Id> mapM2Id = new map<string, Id>();
+
+        for (Account thisAccount : lstAccounts) {
+            mapM2Id.put(thisAccount.MDM_ID__c, thisAccount.Id);
+            setAccounts.add(thisAccount.Id);
+        }
+
+        Set<String> setParentTypes = new Set<String>();
+
+        // Verify the parents are right with subdistricts
+        setParentTypes.add('D');
+        setParentTypes.add(null);
+
+        map<id, id> mapP2D = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToParentIdMap(setAccounts, setParentTypes);
+
+        // State points to state
+        System.assertEquals(mapP2D.get(mapM2Id.get('111111')), mapM2Id.get('111111'));
+
+        // District points to district
+        System.assertEquals(mapP2D.get(mapM2Id.get('011111')), mapM2Id.get('011111'));
+
+        // District school points to district
+        System.assertEquals(mapP2D.get(mapM2Id.get('001113')), mapM2Id.get('011111'));
+
+        // Non-District school points to non-district school
+        System.assertEquals(mapP2D.get(mapM2Id.get('001112')), mapM2Id.get('001112'));
+
+        // Subdistrict points to subdistrict
+        System.assertEquals(mapP2D.get(mapM2Id.get('011113')), mapM2Id.get('011113'));
+
+        // Subdistrict School points to subdistrict
+        System.assertEquals(mapP2D.get(mapM2Id.get('001133')), mapM2Id.get('011113'));
+
+        // Verify the parents are right, if sub-districts are not included
+        setParentTypes.remove(null);
+
+        mapP2D = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToParentIdMap(setAccounts, setParentTypes);
+
+        // State points to state
+        System.assertEquals(mapP2D.get(mapM2Id.get('111111')), mapM2Id.get('111111'));
+
+        // District points to district
+        System.assertEquals(mapP2D.get(mapM2Id.get('011111')), mapM2Id.get('011111'));
+
+        // District school points to district
+        System.assertEquals(mapP2D.get(mapM2Id.get('001113')), mapM2Id.get('011111'));
+
+        // Non-District school points to non-district school
+        System.assertEquals(mapP2D.get(mapM2Id.get('001112')), mapM2Id.get('001112'));
+
+        // Subdistrict points to district
+        System.assertEquals(mapP2D.get(mapM2Id.get('011113')), mapM2Id.get('011111'));
+
+        // Subdistrict School points to district
+        System.assertEquals(mapP2D.get(mapM2Id.get('001133')), mapM2Id.get('011111'));
+    }
+
+    @isTest
+    public static void testgetAccountIdToHierarchyApprovalMap() {
+        list<Account> lstAccounts = [
+                SELECT
+                        Id,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c in ('111111', '011111', '001112', '001113', '011113', '001133')
+        ];
+
+        set<id> setAccounts = new set<id>();
+        map<string, Id> mapM2Id = new map<string, Id>();
+
+        for (Account thisAccount : lstAccounts) {
+            mapM2Id.put(thisAccount.MDM_ID__c, thisAccount.Id);
+            setAccounts.add(thisAccount.Id);
+        }
+
+        map<id, map<integer, Hierarchy_Approval__c>> mapA2HARecord = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToHierarchyApprovalMap(setAccounts);
+
+        // Verify the HA records are right
+        map<integer, Hierarchy_Approval__c> mapHA;
+        Hierarchy_Approval__c thisHA;
+
+        // State points to null
+        mapHA = mapA2HARecord.get(mapM2Id.get('111111'));
+        System.assertEquals(mapHA, null);
+
+        // District points to district
+        mapHA = mapA2HARecord.get(mapM2Id.get('011111'));
+        thisHA = (Hierarchy_Approval__c) mapHA.get(0);
+        System.assertEquals(thisHA.District_Account__c, mapM2Id.get('011111'));
+
+        // District school points to district
+        mapHA = mapA2HARecord.get(mapM2Id.get('001113'));
+        thisHA = (Hierarchy_Approval__c) mapHA.get(0);
+        System.assertEquals(thisHA.District_Account__c, mapM2Id.get('011111'));
+
+        // Non-District school points to non-district school
+        mapHA = mapA2HARecord.get(mapM2Id.get('001112'));
+        thisHA = (Hierarchy_Approval__c) mapHA.get(0);
+        System.assertEquals(thisHA.District_Account__c, mapM2Id.get('001112'));
+
+        // Sub-district points to the district
+        mapHA = mapA2HARecord.get(mapM2Id.get('011113'));
+        thisHA = (Hierarchy_Approval__c) mapHA.get(0);
+        System.assertEquals(thisHA.District_Account__c, mapM2Id.get('011111'));
+
+        // Sub-district school points to the district
+        mapHA = mapA2HARecord.get(mapM2Id.get('001133'));
+        thisHA = (Hierarchy_Approval__c) mapHA.get(0);
+        System.assertEquals(thisHA.District_Account__c, mapM2Id.get('011111'));
+    }
+
+    @isTest
+    public static void testgetAccountIdToRoleMapForUser() {
+        list<Account> lstAccounts = [
+                SELECT
+                        Id,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c in ('111111', '011111', '001112', '001113')
+        ];
+
+        set<id> setAccounts = new set<id>();
+        map<Id, Account> mapM2A = new map<Id, Account>();
+
+        for (Account thisAccount : lstAccounts) {
+            mapM2A.put(thisAccount.Id, thisAccount);
+            setAccounts.add(thisAccount.Id);
+        }
+
+        // Get the test user
+        User thisUser = [SELECT Id FROM User WHERE Email = 'communityuser@act.com'];
+
+        map<id, string> mapA2R = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToRoleMapForUser(thisUser.Id, false, 'Trusted Agent');
+
+        // Verify the test user has access to the appropriate accounts
+        for (id idAccount : setAccounts) {
+            // Ensure there is no record for the state, or the district school, but there is for other account
+            Account thisAccount = mapM2A.get(idAccount);
+
+            System.assertEquals(mapA2R.get(idAccount) == null, (thisAccount.MDM_ID__c == '111111' || thisAccount.MDM_ID__c == '001113'));
+        }
+        try{
+            ACT_GEN_HierarchyFunctions.getAccountIdToRoleMapForUser(null, false, 'Trusted Agent2');
+        }
+        catch(Exception e){
+
+        }
+    }
+
+    @isTest
+    public static void testgetAccountIdToUserMap() {
+        list<Account> lstAccounts = [
+                SELECT
+                        Id,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c in ('111111', '011111', '001112', '001113')
+        ];
+
+        set<id> setAccounts = new set<id>();
+        map<Id, Account> mapM2A = new map<Id, Account>();
+
+        for (Account thisAccount : lstAccounts) {
+            mapM2A.put(thisAccount.Id, thisAccount);
+            setAccounts.add(thisAccount.Id);
+        }
+
+        map<id, list<AccountContactRelation>> mapA2ACR = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToUserMap(setAccounts, false, null);
+
+        // Verify the test user has access to the appropriate accounts
+        for (id idAccount : setAccounts) {
+            list<AccountContactRelation> lstACR = mapA2ACR.get(idAccount);
+            Account thisAccount = mapM2A.get(idAccount);
+
+            // Ensure there is no record for the state or district school, but there is for other accounts
+            switch on thisAccount.MDM_ID__c {
+                when '111111', '001113' {
+                    System.assertEquals(lstACR, null);
+                }
+
+                when '011111', '001112' {
+                    //System.assertEquals(lstACR[0].IsActive, true);
+                    System.assertEquals(lstACR[0].Status__c, 'Active');
+                    System.assertEquals(lstACR[0].Success_Community_Role__c, 'Trusted Agent');
+                }
+
+                when else {
+                    // Throw an error
+                    integer intTest = 1/0;
+                }
+            }
+        }
+
+        try{
+            ACT_GEN_HierarchyFunctions.getAccountIdToUserMap(null, false, null);
+        }
+        catch(Exception e){
+
+        }
+    }
+
+    @isTest
+    public static void testgetHierarchyByHierarchyApproval() {
+        list<Hierarchy_Approval__c> lstHA =
+        [
+                SELECT
+                        Id
+                FROM
+                        Hierarchy_Approval__c
+                LIMIT 1
+        ];
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.getHierarchyByHierarchyApproval(lstHA[0].Id);
+    }
+
+    @isTest
+    public static void testgrantContactsACRToAccount() {
+        // Get some districts
+        list<Account> lstAccounts = [
+                SELECT
+                        Id,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c in ('011113', '011133')
+        ];
+
+        // Get the test user
+        User thisUser = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+
+        set<id> setContacts = new set<Id>();
+
+        setContacts.add(thisUser.ContactId);
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(lstAccounts[0].id, setContacts, 'Trusted Agent', 'Admin-Full', null, 'TAA Coordinator', thisUser.ContactId, 'Grant', null, null, 'Testing');
+    }
+    @isTest
+    public static void testgrantContactsACRToAccountWithPANext() {
+        // Get some districts
+        list<Account> lstAccounts = [
+                SELECT
+                        Id,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c in ('011113', '011133')
+        ];
+
+        // Get the test user
+        User thisUser = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+
+        set<id> setContacts = new set<Id>();
+
+        setContacts.add(thisUser.ContactId);
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccountWithPANext(lstAccounts[0].id, setContacts, 'Trusted Agent', 'Admin-Full', null, 'TAA Coordinator', thisUser.ContactId, 'Grant', null, null, 'Testing', 'View Contract Deliverables');
+    }
+
+    @isTest
+    public static void testsetACRAccess() {
+        // Get some accounts
+        list<Account> lstAccounts = [
+                SELECT
+                        Id,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c in ('111111', '011111', '001112', '001113')
+        ];
+        Account StateAcc = [
+                SELECT
+                        Id,
+                        eMetric_Org_Type__c,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c = '111111'
+        ];
+
+        // Get the test user
+        User thisUser = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+
+        // "Create" some new ACRs
+        list<ACT_GEN_HierarchyFunctions.ACRMVP> lstAccess = new list<ACT_GEN_HierarchyFunctions.ACRMVP>();
+
+        ACT_GEN_HierarchyFunctions.ACRMVP thisACRMVP = new ACT_GEN_HierarchyFunctions.ACRMVP();
+
+        thisACRMVP.AccountId = lstAccounts[0].Id;
+        thisACRMVP.Active = true;
+        thisACRMVP.ContactId = thisUser.ContactId;
+        thisACRMVP.Contract = '1234';
+        thisACRMVP.EdFiRole = 'EDFI_TENANT_ADMIN';
+        thisACRMVP.Status = 'Active';
+        thisACRMVP.SuccessCommunityRole = 'Trusted Agent';
+        thisACRMVP.TAARole = 'TAA Coordinator';
+
+        lstAccess.add(thisACRMVP);
+
+        ACT_GEN_HierarchyFunctions.ACRMVP thisACRMVPState = new ACT_GEN_HierarchyFunctions.ACRMVP();
+
+        thisACRMVPState.AccountId = StateAcc.Id;
+        thisACRMVPState.Active = true;
+        thisACRMVPState.ContactId = thisUser.ContactId;
+        thisACRMVPState.Contract = '1234';
+        thisACRMVPState.EdFiRole = '';
+        thisACRMVPState.Status = 'Active';
+        thisACRMVPState.SuccessCommunityRole = 'State Trusted Agent';
+        thisACRMVPState.eMetricsRole = 'Admin-Full';
+        thisACRMVPState.TAARole = '';
+
+        lstAccess.add(thisACRMVPState);
+        test.startTest();
+        ACT_GEN_HierarchyFunctionsWithoutSharing.setACRAccess(lstAccess);
+        test.stopTest();
+    }
+
+    @isTest
+    public static void getHierarchyApprovalNeededForUser() {
+        // Get the test user
+        User thisUser = [SELECT Id FROM User WHERE Email = 'communityuser@act.com'];
+
+        // Test the function
+        boolean blnTest = ACT_GEN_HierarchyFunctionsWithoutSharing.getHierarchyApprovalNeededForUser(thisUser.Id);
+
+        system.debug('blnTest = ' + blnTest);
+    }
+
+    @isTest
+    public static void testACRRulesDistricts() {
+        // Test each rule individually, removing any acrs/access records in between
+
+        // Declare shared variables
+        string strTest;
+        list<AccountContactRelation> testACRs;
+
+        // Get the test user
+        User thisUser = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+
+        // Get all accounts, and map them
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        list<Account> lstAccounts =
+        [
+                SELECT
+                        Id,
+                        Name,
+                        eMetric_Org_Type__c,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        RecordTypeId =: idCA
+        ];
+
+        map<string, Account> mapMDMAccounts = new map<string, Account>();
+
+        for (Account thisA : lstAccounts) {
+            mapMDMAccounts.put(thisA.MDM_ID__c, thisA);
+        }
+
+        test.startTest();
+
+        // When a Trusted Agent is created against a parent district (emetric org type = d)
+        //   An ACR is created for the district
+        //   An ACR is created for each account below the district.
+        //     SSO includes only district ID
+        //     In eMetric, user sees district and schools
+        removeACRsAndAccess();
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(mapMDMAccounts.get('022222').Id, new set<id>{thisUser.ContactId}, 'Trusted Agent', 'Admin-Full', null, null, thisUser.ContactId, 'Grant', null, null, 'Testing');
+
+        System.runAs(thisUser) {
+            ACT_OLRDashboardPage.generateeMetricsSAML(thisUser.ContactId, null);
+        }
+
+        // Get the results
+        strTest = getSAML();
+        testACRs = getACRs();
+
+        for (AccountContactRelation thisACR2 : testACRs) {
+            system.debug('qqq ' + thisACR2.Account.MDM_ID__c);
+        }
+
+        System.assertEquals('022222:Admin-Full:D,02222232901:Admin-Full:D,22222:Admin-Full:D', strTest);
+        System.assertEquals(2, testACRs.size());
+
+        // When an Online Reporting user is created against a parent district (emetric org type = d)
+        //   An ACR is created for the district
+        //   An ACR is created for each account below the district.
+        //     SSO includes only district ID
+        //     In eMetric, user sees district and schools
+        removeACRsAndAccess();
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(mapMDMAccounts.get('022222').Id, new set<id>{thisUser.ContactId}, 'Standard', 'Normal-Full', null, null, null, null, null, null, null);
+
+        System.runAs(thisUser) {
+            ACT_OLRDashboardPage.generateeMetricsSAML(thisUser.ContactId, null);
+        }
+
+        // Get the results
+        strTest = getSAML();
+        testACRs = getACRs();
+
+        System.assertEquals('022222:Normal-Full:D,02222232901:Normal-Full:D,22222:Normal-Full:D', strTest);
+        System.assertEquals(2, testACRs.size());
+    }
+
+    @isTest
+    public static void testACRRulesOther() {
+        // Test each rule individually, removing any acrs/access records in between
+
+        // Declare shared variables
+        string strTest;
+        list<AccountContactRelation> testACRs;
+
+        // Get the test user
+        User thisUser = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+
+        // Get all accounts, and map them
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        list<Account> lstAccounts =
+        [
+                SELECT
+                        Id,
+                        Name,
+                        eMetric_Org_Type__c,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        RecordTypeId =: idCA
+        ];
+
+        map<string, Account> mapMDMAccounts = new map<string, Account>();
+
+        for (Account thisA : lstAccounts) {
+            mapMDMAccounts.put(thisA.MDM_ID__c, thisA);
+        }
+
+        test.startTest();
+
+        // When a Trusted Agent is created against a building (emetric org type = b)
+        //   An ACR is created for the school
+        //     SSO includes schools only
+        //     In eMetric, user sees only school
+        removeACRsAndAccess();
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(mapMDMAccounts.get('004449').Id, new set<id>{thisUser.ContactId}, 'Trusted Agent', 'Admin-Full', null, null, null, null, null, null, null);
+
+        System.runAs(thisUser) {
+            ACT_OLRDashboardPage.generateeMetricsSAML(thisUser.ContactId, null);
+        }
+
+        // Get the results
+        strTest = getSAML();
+        testACRs = getACRs();
+
+        System.assertEquals('004449:Admin-Full:B,004449354:Admin-Full:B,4449:Admin-Full:B', strTest);
+        System.assertEquals(1, testACRs.size());
+
+        // When an Online Reporting user is created against a building (emetric org type = b)
+        //   An ACR is created for the school
+        //     SSO includes schools only
+        //     In eMetric, user sees only school
+        removeACRsAndAccess();
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(mapMDMAccounts.get('004449').Id, new set<id>{thisUser.ContactId}, 'Standard', 'Normal-Full', null, null, null, null, null, null, null);
+
+        System.runAs(thisUser) {
+            ACT_OLRDashboardPage.generateeMetricsSAML(thisUser.ContactId, null);
+        }
+
+        // Get the results
+        strTest = getSAML();
+        testACRs = getACRs();
+
+        System.assertEquals('004449:Normal-Full:B,004449354:Normal-Full:B,4449:Normal-Full:B', strTest);
+        System.assertEquals(1, testACRs.size());
+
+        // When a State User is created against a state (emetric org type = s)
+        //   An ACR is created for the state
+        //     SSO includes schools only
+        //     In eMetric, user sees only school
+        removeACRsAndAccess();
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(mapMDMAccounts.get('111111').Id, new set<id>{thisUser.ContactId}, 'Standard', 'Normal-Limited', null, null, null, null, null, null, null);
+
+        System.runAs(thisUser) {
+            ACT_OLRDashboardPage.generateeMetricsSAML(thisUser.ContactId, null);
+        }
+
+        // Get the results
+        strTest = getSAML();
+        testACRs = getACRs();
+
+        System.assertEquals('111111:Normal-Limited:S', strTest);
+        System.assertEquals(1, testACRs.size());
+    }
+
+    @isTest
+    public static void testACRRulesSubDistricts() {
+        // Test each rule individually, removing any acrs/access records in between
+
+        // Declare shared variables
+        string strTest;
+        list<AccountContactRelation> testACRs;
+
+        // Get the test user
+        User thisUser = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+
+        // Get all accounts, and map them
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        list<Account> lstAccounts =
+        [
+                SELECT
+                        Id,
+                        Name,
+                        eMetric_Org_Type__c,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        RecordTypeId =: idCA
+        ];
+
+        map<string, Account> mapMDMAccounts = new map<string, Account>();
+
+        for (Account thisA : lstAccounts) {
+            mapMDMAccounts.put(thisA.MDM_ID__c, thisA);
+        }
+
+        test.startTest();
+
+        // When a Trusted Agent is created against a child district (defined as emetric org type = null AND reporting to an account with emetric org type = d)
+        //   An ACR is created for the district
+        //   An ACR is created for each account below the district.
+        //     SSO includes districts and schools underneath
+        //     In eMetric, user sees only schools
+        removeACRsAndAccess();
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(mapMDMAccounts.get('011113').Id, new set<id>{thisUser.ContactId}, 'Trusted Agent', 'Admin-Full', null, null, null, null, null, null, null);
+
+        System.runAs(thisUser) {
+            ACT_OLRDashboardPage.generateeMetricsSAML(thisUser.ContactId, null);
+        }
+
+        // Get the results
+        strTest = getSAML();
+        testACRs = getACRs();
+
+        System.assertEquals('001133:Admin-Full:B,00113331471:Admin-Full:B,1133:Admin-Full:B', strTest);
+        System.assertEquals(2, testACRs.size());
+
+        // When an Online Reporting User is created against a child district (defined as emetric org type = null AND reporting to an account with emetric org type = d)
+        //   An ACR is created for the district
+        //   ACR is created for each account below the district.
+        //     SSO includes district and schools underneath
+        //     In eMetric, user sees only schools
+        removeACRsAndAccess();
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(mapMDMAccounts.get('011113').Id, new set<id>{thisUser.ContactId}, 'Standard', 'Normal-Full', null, null, null, null, null, null, null);
+
+        System.runAs(thisUser) {
+            ACT_OLRDashboardPage.generateeMetricsSAML(thisUser.ContactId, null);
+        }
+
+        // Get the results
+        strTest = getSAML();
+        testACRs = getACRs();
+
+        System.assertEquals('001133:Normal-Full:B,00113331471:Normal-Full:B,1133:Normal-Full:B', strTest);
+        System.assertEquals(2, testACRs.size());
+
+        // Deactivate the HA record, and ensure the SAML is null
+        set<id> setA = new set<id>();
+        setA.add(mapMDMAccounts.get('011113').Id);
+
+        map<id, map<integer, Hierarchy_Approval__c>> mapHA = ACT_GEN_HierarchyFunctionsWithoutSharing.getAccountIdToHierarchyApprovalMap(setA);
+
+        map<integer, Hierarchy_Approval__c> thisHAMap = mapHA.get(mapMDMAccounts.get('011113').Id);
+        Hierarchy_Approval__c thisHA = thisHAMap.get(0);
+        thisHA.Status__c = 'Disputed';
+        update thisHA;
+
+        System.runAs(thisUser) {
+            ACT_OLRDashboardPage.generateeMetricsSAML(thisUser.ContactId, null);
+        }
+
+        strTest = getSAML();
+        System.assertEquals(null, strTest);
+    }
+
+    @isTest
+    public static void testAccountChangeTriggerNewAccount() {
+        // Get the test users
+        User thisUser1 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+        User thisUser2 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser2@act.com'];
+        User thisUser3 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser3@act.com'];
+
+        // Get all accounts, and map them
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        list<Account> lstAccounts =
+        [
+                SELECT
+                        Id,
+                        Name,
+                        eMetric_Org_Type__c,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        RecordTypeId =: idCA
+        ];
+
+        map<string, Account> mapMDMAccounts = new map<string, Account>();
+
+        for (Account thisA : lstAccounts) {
+            mapMDMAccounts.put(thisA.MDM_ID__c, thisA);
+        }
+
+        // Remove existing ACRs to prevent bad results
+        removeACRsAndAccess();
+
+        test.startTest();
+
+        // When a new account is added to an existing district
+        //   The users that have access to the district, should have access to the new account
+        Account actDistAl = mapMDMAccounts.get('011111');
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(actDistAl.Id, new set<Id>{thisUser1.ContactId, thisUser2.ContactId}, 'Trusted Agent', 'Admin-Full', 'EDFI_TENANT_ADMIN', 'TAA Coordinator', null, null, null, null, null);
+
+        Account actNewSchool = new Account();
+
+        actNewSchool.Name = 'New District School - Alabama';
+        actNewSchool.Active__c = true;
+        actNewSchool.eMetric_Org_Type__c = 'B';
+        actNewSchool.Industry = 'Education';
+        actNewSchool.MDM_ID__c = '012222';
+        actNewSchool.ParentID = actDistAl.Id;
+        actNewSchool.RecordTypeId = idCA;
+
+        insert actNewSchool;
+
+        list<AccountContactRelation> lstTestACRS = getACRs();
+
+        boolean blnUser1 = false;
+        boolean blnUser2 = false;
+        boolean blnUser3 = false;
+
+        for (AccountContactRelation thisACR : lstTestACRS) {
+            if (thisACR.AccountId == actNewSchool.Id && thisACR.eMetrics_Role__c == 'Admin-Full' && thisACR.Success_Community_Role__c == 'Trusted Agent' && thisACR.Ed_Fi_Role__c == 'EDFI_TENANT_ADMIN' && thisACR.TAA_Role__c == 'ACCTAC') {
+                if (thisACR.ContactId == thisUser1.ContactId) {
+                    blnUser1 = true;
+                }
+
+                if (thisACR.ContactId == thisUser2.ContactId) {
+                    blnUser2 = true;
+                }
+
+                if (thisACR.ContactId == thisUser3.ContactId) {
+                    blnUser3 = true;
+                }
+            }
+        }
+
+        system.assert(blnUser1 && blnUser2 && !blnUser3);
+    }
+
+    @isTest
+    public static void testAccountChangeTriggerRemoveParent() {
+        // Get the test users
+        User thisUser1 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+        User thisUser2 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser2@act.com'];
+        User thisUser3 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser3@act.com'];
+
+        // Get all accounts, and map them
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        list<Account> lstAccounts =
+        [
+                SELECT
+                        Id,
+                        Name,
+                        eMetric_Org_Type__c,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        RecordTypeId =: idCA
+        ];
+
+        map<string, Account> mapMDMAccounts = new map<string, Account>();
+
+        for (Account thisA : lstAccounts) {
+            mapMDMAccounts.put(thisA.MDM_ID__c, thisA);
+        }
+
+        // Remove existing ACRs to prevent bad results
+        removeACRsAndAccess();
+
+        test.startTest();
+
+        // When a new account is added to an existing district
+        //   The users that have access to the district, should have access to the new account
+        // Then remove the account from it's parent
+        //   The users should have an ACR, but it will be inactive
+        Account actDistAl = mapMDMAccounts.get('011111');
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(actDistAl.Id, new set<Id>{thisUser1.ContactId, thisUser2.ContactId}, 'Trusted Agent', 'Admin-Full', 'EDFI_TENANT_ADMIN', 'TAA Coordinator', null, null, null, null, null);
+
+        Account actNewSchool = new Account();
+
+        actNewSchool.Name = 'New District School - Alabama';
+        actNewSchool.Active__c = true;
+        actNewSchool.eMetric_Org_Type__c = 'B';
+        actNewSchool.Industry = 'Education';
+        actNewSchool.MDM_ID__c = '012222';
+        actNewSchool.ParentID = actDistAl.Id;
+        actNewSchool.RecordTypeId = idCA;
+
+        insert actNewSchool;
+
+        // Remove the parent
+        actNewSchool.ParentId = null;
+        update actNewSchool;
+
+        list<AccountContactRelation> lstTestACRS = getACRs();
+
+        boolean blnUser1 = false;
+        boolean blnUser2 = false;
+        boolean blnUser3 = false;
+
+        for (AccountContactRelation thisACR : lstTestACRS) {
+            if (thisACR.AccountId == actNewSchool.Id && thisACR.eMetrics_Role__c == 'Admin-Full' && thisACR.Success_Community_Role__c == 'Trusted Agent' && thisACR.Ed_Fi_Role__c == 'EDFI_TENANT_ADMIN' && thisACR.TAA_Role__c == 'ACCTAC') {
+                if (thisACR.ContactId == thisUser1.ContactId && !thisACR.IsActive) {
+                    blnUser1 = true;
+                }
+
+                if (thisACR.ContactId == thisUser2.ContactId && !thisACR.IsActive) {
+                    blnUser2 = true;
+                }
+
+                if (thisACR.ContactId == thisUser3.ContactId) {
+                    blnUser3 = true;
+                }
+            }
+        }
+
+        system.assert(blnUser1 && blnUser2 && !blnUser3);
+    }
+
+    @isTest
+    public static void testAccountChangeTriggerChangeParent() {
+        // Get the test users
+        User thisUser1 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+        User thisUser2 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser2@act.com'];
+        User thisUser3 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser3@act.com'];
+
+        // Get all accounts, and map them
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        list<Account> lstAccounts =
+        [
+                SELECT
+                        Id,
+                        Name,
+                        eMetric_Org_Type__c,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        RecordTypeId =: idCA
+        ];
+
+        map<string, Account> mapMDMAccounts = new map<string, Account>();
+
+        for (Account thisA : lstAccounts) {
+            mapMDMAccounts.put(thisA.MDM_ID__c, thisA);
+        }
+
+        // Remove existing ACRs to prevent bad results
+        removeACRsAndAccess();
+
+        test.startTest();
+
+        // When an existing school is changed from one parent to another
+        //   The users that had active access to the original district, should have inactive ACRs to that school
+        //   The users from the new parent district, should have equivalent access to the new school
+        Account actDistAl = mapMDMAccounts.get('011111');
+        Account actDistA2 = mapMDMAccounts.get('022222');
+        Account actDSA1 = mapMDMAccounts.get('001113');
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(actDistAl.Id, new set<Id>{thisUser1.ContactId, thisUser2.ContactId}, 'Trusted Agent', 'Admin-Full', 'EDFI_TENANT_ADMIN', 'TAA Coordinator', null, null, null, null, null);
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(actDistA2.Id, new set<Id>{thisUser2.ContactId, thisUser3.ContactId}, 'Standard', 'Summary', 'EDFI_TENANT_ADMIN', 'TAA Coordinator', null, null, null, null, null);
+
+        // Change the Alabama district school to the North Carolina district
+        actDSA1.ParentId = actDistA2.Id;
+        update actDSA1;
+
+        // Get the results
+        list<AccountContactRelation> lstTestACRS = getACRs();
+
+        boolean blnUser1 = false;
+        boolean blnUser2 = false;
+        boolean blnUser3 = false;
+
+        for (AccountContactRelation thisACR : lstTestACRS) {
+            if (thisACR.AccountId == actDSA1.Id && thisACR.Ed_Fi_Role__c == 'EDFI_TENANT_ADMIN' && thisACR.TAA_Role__c == 'ACCTAC') {
+                if (thisACR.ContactId == thisUser1.ContactId && !thisACR.IsActive && thisACR.Success_Community_Role__c == 'Trusted Agent' && thisACR.eMetrics_Role__c == 'Admin-Full') {
+                    blnUser1 = true;
+                }
+
+                if (thisACR.ContactId == thisUser2.ContactId && thisACR.IsActive && thisACR.Success_Community_Role__c == 'Standard' && thisACR.eMetrics_Role__c == 'Summary') {
+                    blnUser2 = true;
+                }
+
+                if (thisACR.ContactId == thisUser3.ContactId && thisACR.IsActive && thisACR.Success_Community_Role__c == 'Standard' && thisACR.eMetrics_Role__c == 'Summary') {
+                    blnUser3 = true;
+                }
+            }
+        }
+
+        System.debug('blnUser1=' + blnUser1 + ', blnUser2=' + blnUser2 + ', blnUser3 = ' + blnUser3);
+
+        system.assert(blnUser1 && blnUser2 && blnUser3);
+    }
+
+    @isTest
+    public static void testAccountChangeTriggerDeactivateDistrict() {
+        // Get the test users
+        User thisUser1 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+        User thisUser2 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser2@act.com'];
+        User thisUser3 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser3@act.com'];
+
+        // Get all accounts, and map them
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        list<Account> lstAccounts =
+        [
+                SELECT
+                        Id,
+                        Name,
+                        eMetric_Org_Type__c,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        RecordTypeId =: idCA
+        ];
+
+        map<string, Account> mapMDMAccounts = new map<string, Account>();
+
+        for (Account thisA : lstAccounts) {
+            mapMDMAccounts.put(thisA.MDM_ID__c, thisA);
+        }
+
+        // Remove existing ACRs to prevent bad results
+        removeACRsAndAccess();
+
+        test.startTest();
+
+        // When an existing school is changed from one parent to another
+        //   The users that had active access to the original district, should have inactive ACRs to that school
+        //   The users from the new parent district, should have equivalent access to the new school
+        Account actDistAl = mapMDMAccounts.get('011111');
+        Account actDSA1 = mapMDMAccounts.get('001113');
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(actDistAl.Id, new set<Id>{thisUser1.ContactId, thisUser2.ContactId}, 'Trusted Agent', 'Admin-Full', 'EDFI_TENANT_ADMIN', 'TAA Coordinator', null, null, null, null, null);
+
+        // Change the Alabama district school to the North Carolina district
+        actDistAl.Active__c = false;
+        update actDistAl;
+
+        // Get the results
+        list<AccountContactRelation> lstTestACRS = getACRs();
+
+        boolean blnUser1D = false;
+        boolean blnUser1S = false;
+        boolean blnUser2D = false;
+        boolean blnUser2S = false;
+        boolean blnUser3 = true;
+
+        for (AccountContactRelation thisACR : lstTestACRS) {
+            if (thisACR.Ed_Fi_Role__c == 'EDFI_TENANT_ADMIN' && thisACR.TAA_Role__c == 'ACCTAC' && thisACR.eMetrics_Role__c == 'Admin-Full') {
+                if (thisACR.ContactId == thisUser1.ContactId && thisACR.AccountId == actDistAl.Id && !thisACR.IsActive) {
+                    blnUser1D = true;
+                }
+
+                if (thisACR.ContactId == thisUser1.ContactId && thisACR.AccountId == actDSA1.Id && !thisACR.IsActive) {
+                    blnUser1S = true;
+                }
+
+                if (thisACR.ContactId == thisUser2.ContactId && thisACR.AccountId == actDistAl.Id && !thisACR.IsActive) {
+                    blnUser2D = true;
+                }
+
+                if (thisACR.ContactId == thisUser2.ContactId && thisACR.AccountId == actDSA1.Id && !thisACR.IsActive) {
+                    blnUser2S = true;
+                }
+
+                if (thisACR.ContactId == thisUser3.ContactId) {
+                    blnUser3 = false;
+                }
+            }
+        }
+
+        system.assert(blnUser1D && blnUser1S && blnUser2D && blnUser2S && blnUser3);
+    }
+
+    @isTest
+    public static void testAccountChangeTriggerDeactivateSchool() {
+        // Get the test users
+        User thisUser1 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+        User thisUser2 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser2@act.com'];
+        User thisUser3 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser3@act.com'];
+
+        // Get all accounts, and map them
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        list<Account> lstAccounts =
+        [
+                SELECT
+                        Id,
+                        Name,
+                        eMetric_Org_Type__c,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        RecordTypeId =: idCA
+        ];
+
+        map<string, Account> mapMDMAccounts = new map<string, Account>();
+
+        for (Account thisA : lstAccounts) {
+            mapMDMAccounts.put(thisA.MDM_ID__c, thisA);
+        }
+
+        // Remove existing ACRs to prevent bad results
+        removeACRsAndAccess();
+
+        test.startTest();
+
+        // When an existing school is changed from one parent to another
+        //   The users that had active access to the original district, should have inactive ACRs to that school
+        //   The users from the new parent district, should have equivalent access to the new school
+        Account actDistAl = mapMDMAccounts.get('011111');
+        Account actDSA1 = mapMDMAccounts.get('001113');
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(actDistAl.Id, new set<Id>{thisUser1.ContactId, thisUser2.ContactId}, 'Trusted Agent', 'Admin-Full', 'EDFI_TENANT_ADMIN', 'TAA Coordinator', null, null, null, null, null);
+
+        // Change the Alabama district school to the North Carolina district
+        actDSA1.Active__c = false;
+        update actDSA1;
+
+        // Get the results
+        list<AccountContactRelation> lstTestACRS = getACRs();
+
+        boolean blnUser1D = false;
+        boolean blnUser1S = false;
+        boolean blnUser2D = false;
+        boolean blnUser2S = false;
+        boolean blnUser3 = true;
+
+        for (AccountContactRelation thisACR : lstTestACRS) {
+            if (thisACR.Ed_Fi_Role__c == 'EDFI_TENANT_ADMIN' && thisACR.TAA_Role__c == 'ACCTAC' && thisACR.eMetrics_Role__c == 'Admin-Full') {
+                if (thisACR.ContactId == thisUser1.ContactId && thisACR.AccountId == actDistAl.Id && thisACR.IsActive) {
+                    blnUser1D = true;
+                }
+
+                if (thisACR.ContactId == thisUser1.ContactId && thisACR.AccountId == actDSA1.Id && !thisACR.IsActive) {
+                    blnUser1S = true;
+                }
+
+                if (thisACR.ContactId == thisUser2.ContactId && thisACR.AccountId == actDistAl.Id && thisACR.IsActive) {
+                    blnUser2D = true;
+                }
+
+                if (thisACR.ContactId == thisUser2.ContactId && thisACR.AccountId == actDSA1.Id && !thisACR.IsActive) {
+                    blnUser2S = true;
+                }
+
+                if (thisACR.ContactId == thisUser3.ContactId) {
+                    blnUser3 = false;
+                }
+            }
+        }
+
+        system.assert(blnUser1D && blnUser1S && blnUser2D && blnUser2S && blnUser3);
+    }
+
+    @isTest
+    public static void testAccountChangeTriggerTestToggle() {
+        // Get the test users
+        User thisUser1 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+        User thisUser2 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser2@act.com'];
+        User thisUser3 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser3@act.com'];
+
+        // Get all accounts, and map them
+        id idCA = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Customer Account').getRecordTypeId();
+
+        list<Account> lstAccounts =
+        [
+                SELECT
+                        Id,
+                        Name,
+                        eMetric_Org_Type__c,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        RecordTypeId =: idCA
+        ];
+
+        map<string, Account> mapMDMAccounts = new map<string, Account>();
+
+        for (Account thisA : lstAccounts) {
+            mapMDMAccounts.put(thisA.MDM_ID__c, thisA);
+        }
+
+        // Remove existing ACRs to prevent bad results
+        removeACRsAndAccess();
+
+        test.startTest();
+
+        // When an existing school is changed from one parent to another
+        //   The users that had active access to the original district, should have inactive ACRs to that school
+        //   The users from the new parent district, should have equivalent access to the new school
+        Account actDistAl = mapMDMAccounts.get('011111');
+        Account actDSA1 = mapMDMAccounts.get('001113');
+
+        ACT_GEN_HierarchyFunctionsWithoutSharing.grantContactsACRToAccount(actDistAl.Id, new set<Id>{thisUser1.ContactId, thisUser2.ContactId}, 'Trusted Agent', 'Admin-Full', 'EDFI_TENANT_ADMIN', 'TAA Coordinator', null, null, null, null, null);
+
+        // Turn off the trigger
+        ACT_Success_Toggles__c triggerSetting = ACT_Success_Toggles__c.getOrgDefaults();
+        triggerSetting.Disable_Account_Trigger__c = true;
+        upsert triggerSetting;
+
+        // Change the Alabama district school to the North Carolina district
+        actDSA1.Active__c = false;
+        update actDSA1;
+
+        // Get the results
+        list<AccountContactRelation> lstTestACRS = getACRs();
+
+        boolean blnUser1D = false;
+        boolean blnUser1S = false;
+        boolean blnUser2D = false;
+        boolean blnUser2S = false;
+        boolean blnUser3 = true;
+
+        for (AccountContactRelation thisACR : lstTestACRS) {
+            if (thisACR.Ed_Fi_Role__c == 'EDFI_TENANT_ADMIN' && thisACR.TAA_Role__c == 'ACCTAC' && thisACR.eMetrics_Role__c == 'Admin-Full') {
+                if (thisACR.ContactId == thisUser1.ContactId && thisACR.AccountId == actDistAl.Id && thisACR.IsActive) {
+                    blnUser1D = true;
+                }
+
+                if (thisACR.ContactId == thisUser1.ContactId && thisACR.AccountId == actDSA1.Id && thisACR.IsActive) {
+                    blnUser1S = true;
+                }
+
+                if (thisACR.ContactId == thisUser2.ContactId && thisACR.AccountId == actDistAl.Id && thisACR.IsActive) {
+                    blnUser2D = true;
+                }
+
+                if (thisACR.ContactId == thisUser2.ContactId && thisACR.AccountId == actDSA1.Id && thisACR.IsActive) {
+                    blnUser2S = true;
+                }
+
+                if (thisACR.ContactId == thisUser3.ContactId) {
+                    blnUser3 = false;
+                }
+            }
+        }
+
+        system.assert(blnUser1D && blnUser1S && blnUser2D && blnUser2S && blnUser3);
+    }
+
+    @isTest
+    private static void testProcessAccessCode() {
+        // Get the accounts
+        list<Account> lstAccounts = [
+                SELECT
+                        Id,
+                        Name,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c = '011111'
+        ];
+        // Get the State accounts
+        list<Account> lstStateAccounts = [
+                SELECT
+                        Id,
+                        Name,
+                        MDM_ID__c
+                FROM
+                        Account
+                WHERE
+                        MDM_ID__c = '111111'
+        ];
+
+        // Create an access code for a district
+        Access_Code__c thisAC = new Access_Code__c();
+
+        thisAC.Access_Code__c = '123456';
+        thisAC.District_Account__c = lstAccounts[0].Id;
+        thisAC.Type__c = 'Trusted Agent';
+        thisAC.Uses_Remaining__c = 100;
+
+        insert thisAC;
+        // Create an access code for a state
+        Access_Code__c thisStateAC = new Access_Code__c();
+
+        thisStateAC.Access_Code__c = '89675';
+        thisStateAC.District_Account__c = lstStateAccounts[0].Id;
+        thisStateAC.Type__c = 'State Trusted Agent';
+        thisStateAC.Uses_Remaining__c = 100;
+
+        insert thisStateAC;
+
+        // Remove any hierarchy records for this district
+        list<Hierarchy_Approval__c> lstHA =
+        [
+                SELECT
+                        Id
+                FROM
+                        Hierarchy_Approval__c
+                WHERE
+                        District_Account__c =: lstAccounts[0].Id
+        ];
+
+        delete lstHA;
+
+        // Get a user
+        User thisUser1 = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser2@act.com'];
+
+        // Test the process access code for an existing user
+        ACT_GEN_HierarchyFunctionsWithoutSharing.ProcessAccessCode(lstAccounts[0].Id, '123456', thisUser1.Id);
+        // Test the process state access code for an existing user
+        ACT_GEN_HierarchyFunctionsWithoutSharing.ProcessAccessCode(lstStateAccounts[0].Id, '89675', thisUser1.Id);
+
+    }
+
+    //////////////////////////////
+    // Private helper functions
+    //////////////////////////////
+
+    @isTest
+    // Clear out ACRs and Access records so testing can proceed
+    private static void removeACRsAndAccess() {
+        // Get the test user
+        User thisUser = [SELECT Id, ContactId FROM User WHERE Email = 'communityuser@act.com'];
+
+        // Get any existing ACRs
+        list<AccountContactRelation> lstACR =
+        [
+                SELECT
+                        Account.Name,
+                        AccountId
+                FROM
+                        AccountContactRelation
+                WHERE
+                        ContactId =: thisUser.ContactId
+        ];
+
+        // Look for the parent record
+        boolean blnParent = false;
+        list<AccountContactRelation> lstDelete = new list<AccountContactRelation>();
+
+        for (AccountContactRelation thisACR : lstACR)
+        {
+            if (thisACR.Account.Name == 'Parent')
+            {
+                blnParent = true;
+            }
+            else {
+                lstDelete.add(thisACR);
+            }
+        }
+
+        // Create the parent, if needed
+        if (!blnParent) {
+            Account actParent = [SELECT Id From Account Where Name = 'Parent'];
+
+            AccountContactRelation newACR = new AccountContactRelation();
+
+            newACR.AccountId = actParent.Id;
+            newACR.ContactId = thisUser.ContactId;
+
+            insert newACR;
+        }
+
+        // Delete the existing ACRs
+        delete lstDelete;
+    }
+
+    @IsTest
+    // Get the ACRs for the use
+    private static list<AccountContactRelation> getACRs() {
+        // Get the test users
+        set<String> setUsers = new set<string>{'communityuser@act.com', 'communityuser2@act.com', 'communityuser3@act.com'};
+        list<User> thisUsers = [SELECT Id, ContactId FROM User WHERE Email In: setUsers];
+
+        set<Id> setContacts = new set<Id>();
+
+        for (User thisU : thisUsers) {
+            setContacts.add(thisU.ContactId);
+        }
+
+        // Get any existing ACRs
+        list<AccountContactRelation> lstACR =
+        [
+                SELECT
+                        AccountId,
+                        Account.Name,
+                        Account.MDM_ID__c,
+                        Contact.Name,
+                        Ed_Fi_Role__c,
+                        eMetrics_Role__c,
+                        IsActive,
+                        Success_Community_Role__c,
+                        TAA_Role__c
+                FROM
+                        AccountContactRelation
+                WHERE
+                        ContactId In: setContacts
+                        And Account.MDM_ID__c != null
+        ];
+
+        // Log the ACRs
+        for (AccountContactRelation thisACR : lstACR) {
+            system.debug(thisACR.Account.Name + ',' + thisACR.Contact.Name + '=' + thisACR.IsActive + ', ' + thisACR.eMetrics_Role__c + '-' + thisACR.Success_Community_Role__c + '-' + thisACR.Ed_Fi_Role__c + '-' + thisACR.TAA_Role__c);
+        }
+
+        return lstACR;
+    }
+
+    @IsTest
+    // Get the SAML Attributes for a user
+    private static string getSAML() {
+        // Get the test user
+        User thisUser = [SELECT Id, SAML_Attribute_1__c, SAML_Attribute_2__c FROM User WHERE Email = 'communityuser@act.com'];
+
+        return thisUser.SAML_Attribute_1__c;
+    }
+
+    @IsTest
+    // Test string conversions
+    private static void testStrings() {
+        string strTest;
+
+        // Get state account
+        Account actState = [SELECT Id, MDM_ID__c, eMetric_Org_Type__c FROM Account WHERE eMetric_Org_Type__c = 'S' LIMIT 1];
+
+        // Get Non-state account
+        Account actNonState = [SELECT Id, MDM_ID__c, eMetric_Org_Type__c FROM Account WHERE eMetric_Org_Type__c != 'S' LIMIT 1];
+
+        strTest = ACT_GEN_HierarchyFunctions.getTAARole('true');
+
+        strTest = ACT_GEN_HierarchyFunctions.getSuccessCommunityRole(actState, 'Trusted Agent');
+        strTest = ACT_GEN_HierarchyFunctions.getSuccessCommunityRole(actState, 'State Trusted Agent');
+        strTest = ACT_GEN_HierarchyFunctions.getSuccessCommunityRole(actNonState, 'Trusted Agent');
+        strTest = ACT_GEN_HierarchyFunctions.getSuccessCommunityRole(actNonState, 'Summary Viewer');
+
+        strTest = ACT_GEN_HierarchyFunctions.getRequestedRole('Trusted Agent');
+        strTest = ACT_GEN_HierarchyFunctions.getRequestedRole('State Trusted Agent');
+        strTest = ACT_GEN_HierarchyFunctions.getRequestedRole('Summary Viewer');
+        strTest = ACT_GEN_HierarchyFunctions.getRequestedRole('Detail Viewer');
+
+        strTest = ACT_GEN_HierarchyFunctions.geteMetricsRole('Trusted Agent');
+        strTest = ACT_GEN_HierarchyFunctions.geteMetricsRole('Summary Viewer');
+        strTest = ACT_GEN_HierarchyFunctions.geteMetricsRole('Detail Viewer');
+        strTest = ACT_GEN_HierarchyFunctions.geteMetricsRole('State Trusted Agent');
+
+        strTest = ACT_GEN_HierarchyFunctions.getEdFiRole('true', true);
+    }
+}
