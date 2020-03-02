@@ -1,0 +1,71 @@
+<!--
+ - Created by adamsm on 7/12/2019.
+ -->
+
+<aura:component access="global" description="ACT_MobileDataTable" extends="c:ACT_CommunityBase">
+    <!-- Attributes -->
+    <aura:attribute name="aura-id" type="String"/>
+    <aura:attribute name="columns" type="List"/>
+    <aura:attribute name="columnsSize" type="Decimal"/>
+    <aura:attribute name="data" type="SObject[]"/>
+    <aura:attribute name="flatData" type="Object"/>
+    <aura:attribute name="hideCheckboxColumn" type="Boolean" default="false"/>
+    <aura:attribute name="keyField" type="Object"/>
+    <aura:attribute name="onrowselection" type="Aura.Action"/>
+    <aura:attribute name="onsort" type="Aura.Action"/>
+    <aura:attribute name="selectedRows" type="String[]"/>
+    <aura:attribute name="sortedBy" type="String"/>
+    <aura:attribute name="sortedDirection" type="String"/>
+
+    <!-- Do Init -->
+    <aura:handler name="init" value="{!this}" action="{!c.doInit}"/>
+
+    <!-- Show a typical data table if it is not mobile -->
+    <div class="slds-show--medium">
+        <lightning:datatable
+            aura-id = "{!v.aura-id}"
+            columns = "{!v.columns}"
+            data = "{!v.data}"
+            hideCheckboxColumn = "{!v.hideCheckboxColumn}"
+            keyField = "{!v.keyField}"
+            onrowselection = "{!c.DTRecordSelectedClick}"
+            onsort = "{!c.DTChangeSort}"
+            sortedBy = "{!v.sortedBy}"
+            sortedDirection = "{!v.sortedDirection}"
+        />
+    </div>
+
+    <!-- Show the mobile version if it is below medium -->
+    <div class="slds-hide--medium">
+        <!-- Create a tile for each record -->
+        <aura:iteration items="{!v.flatData.Records}" var="thisRecord">
+            <lightning:tile class="tileItem">
+                <!-- Show the selected checkbox, if enabled -->
+                <aura:if isTrue="{!!v.hideCheckboxColumn}">
+                        <lightning:input aura:id="recordSelected"
+                                         checked="{!thisRecord.Selected}"
+                                         class="CB_checkBoxLabelLeft"
+                                         id="{!thisRecord.KeyFieldValue}"
+                                         label="Selected?"
+                                         name="RecordSelected"
+                                         onchange="{!c.tileRecordSelectedClick}"
+                                         type="checkbox"
+                        />
+                    <br/>
+                    <div class="slds-p-top_small"/>
+                </aura:if>
+                <aura:iteration items="{!thisRecord.Fields}" var="thisField">
+                    <!-- Change the output based on the field type -->
+                    <aura:if isTrue="{!thisField.CustomType}">
+                        <aura:if isTrue="{!thisField.FieldType == 'url'}">
+                            <ui:outputText class="textLabel" value="{!thisField.FieldLabel}"/><p class="slds-truncate"><a href="{!thisField.FieldValue}" target="{!thisField.LinkTarget}">{!thisField.LinkLabel}</a></p>
+                        </aura:if>
+                        <aura:set attribute="else">
+                            <ui:outputText class="textLabel" value="{!thisField.FieldLabel}"/><p class="slds-truncate"><ui:outputText class="textValue" value="{!thisField.FieldValue}"/></p>
+                        </aura:set>
+                    </aura:if>
+                </aura:iteration>
+            </lightning:tile>
+        </aura:iteration>
+    </div>
+</aura:component>
