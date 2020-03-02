@@ -1,0 +1,209 @@
+/**
+ * Created by craighoneyfield on 12/14/18.
+ */
+
+public without sharing class ACT_LoginFlowController {
+    public PageReference redirect() {
+        try {
+            ACT_Success_Toggles__c toggleSettings = ACT_Success_Toggles__c.getOrgDefaults();
+            // check for the toggle features(SAO_cdata_On__c,SAO_State_and_District__c) and
+            // allowing user to login without a check on PANext table if any one of them is false.
+            if (toggleSettings.SAO_cdata_On__c == false || toggleSettings.SAO_State_and_District__c == false) {
+                return completeLoginFlow();
+            }
+
+            //initializing variables
+            Id idContact = ACT_CommunityBaseController.CurrentUserContactId();
+
+            // Get the ACRs for this user, and map them
+            List<AccountContactRelation> lstACRs =
+            [
+                    SELECT
+                            AccountId,
+                            eMetrics_Role__c,
+                            PANext_Role__c
+                    FROM
+                            AccountContactRelation
+                    WHERE
+                            ContactId =: idContact
+            ];
+
+            system.debug('ACR Records = ' + string.valueOf(lstACRs.size()));
+
+            map<Id, AccountContactRelation> mapACRs = new map<Id, AccountContactRelation>();
+
+            for (AccountContactRelation thisACR : lstACRs) {
+                mapACRs.put(thisACR.AccountId, thisACR);
+            }
+
+            // Look in PANext in a try/catch block in case there are oData issues
+            List<panextOrgExtract__x> lstPANext;
+            Set<String> setPANextMDMs = new Set<String>();
+
+            try {
+                // check for Test Coordinator Role against TC_EMAIL__c from PANext table
+                lstPANext =
+                [
+                        SELECT
+                                Externalid,
+                                TC_EMAIL__c,
+                                DERIVED_MDM_ID__c
+                        FROM
+                                panextOrgExtract__x
+                        WHERE
+                        TC_EMAIL__c =: UserInfo.getUserEmail().toUpperCase()
+                        OR TC_EMAIL__c =: UserInfo.getUserEmail().toLowerCase()
+                ];
+
+                system.debug('PANext Records = ' + string.valueOf(lstPANext.size()));
+
+                for (panextOrgExtract__x thisPAN : lstPANext) {
+                    setPANextMDMs.add(thisPAN.DERIVED_MDM_ID__c);
+                }
+            }
+            catch (Exception ex) {
+                // This should only fire if the data couldn't be accessed
+                system.debug('Exception occurred when we queried on PANext table >>>>> ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+                CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', '', 'ACT_LoginFlowController queried on PANext table', ex.getMessage(), '', '', '');
+                return completeLoginFlow();
+            }
+
+            // Get the account records with MDM ids for the appropriate accounts
+            List<Account> lstAct =
+            [
+                    SELECT
+                            Id,
+                            MDM_ID__c
+                    FROM
+                            Account
+                    WHERE
+                    Id In: mapACRs.keySet()
+                    Or MDM_ID__c In: setPANextMDMs
+            ];
+
+            system.debug('Accounts Records = ' + string.valueOf(lstAct.size()));
+
+            Map<Id, String> mapA2MDM = new Map<Id, String>();
+            Map<String, Id> mapMDM2A = new Map<String, Id>();
+
+            for (Account thisA : lstAct) {
+                mapA2MDM.put(thisA.Id, thisA.MDM_ID__c);
+                mapMDM2A.put(thisA.MDM_ID__c, thisA.Id);
+            }
+
+            // Prepare to pass the records to Thomas
+            list<ACT_GEN_HierarchyFunctions.ACRMVP> lstACRMVP = new list<ACT_GEN_HierarchyFunctions.ACRMVP>();
+
+            // First deal with records found in the PANext table
+            for (panextOrgExtract__x thisPAN : lstpaNext) {
+                Id IdAccount = mapMDM2A.get(thisPAN.DERIVED_MDM_ID__c);
+
+                system.debug('PA Next MDM = ' + thisPAN.DERIVED_MDM_ID__c + ', Account Id = ' + IdAccount);
+
+                // Add/Update an ACR if the MDM is found in SF, and isn't already set
+                if (IdAccount != null) {
+                    AccountContactRelation thisACR = mapACRs.get(IdAccount);
+
+                    if (thisACR == null || thisACR.PANext_Role__c == null || !thisACR.PANext_Role__c.contains('Test Coordinator')) {
+                        ACT_GEN_HierarchyFunctions.ACRMVP thisAM = new ACT_GEN_HierarchyFunctions.ACRMVP();
+
+                        thisAM.AccountId = IdAccount;
+                        thisAM.Active = true;
+                        thisAM.AuditChangeType = 'PANext';
+                        thisAM.AuditContactId = idContact;
+                        thisAM.AuditReason = 'User Found in PANext';
+                        thisAM.ContactId = idContact;
+                        thisAM.SuccessCommunityRole = 'Standard';
+                        thisAM.PANextRole = 'Test Coordinator';
+                        thisAM.Status = 'Active';
+                        thisAM.UpgradeRolesOnly = true;
+
+                        lstACRMVP.add(thisAM);
+                    }
+                }
+            }
+
+            // Now deal with ACRs for panext that aren't in the PANext table
+            for (AccountContactRelation thisACR : mapACRs.values()) {
+                // Look for ACRs for test coordinator
+                if (thisACR.PANext_Role__c != null && thisACR.PANext_Role__c.contains('Test Coordinator')) {
+                    // Get the MDM for this account
+                    String strMDM = mapA2MDM.get(thisACR.AccountId);
+
+                    // Check if this mdm is in the panext set, if not, remove it
+                    if (!setPANextMDMs.contains(strMDM)) {
+                        ACT_GEN_HierarchyFunctions.ACRMVP thisAM = new ACT_GEN_HierarchyFunctions.ACRMVP();
+
+                        thisAM.AccountId = thisACR.AccountId;
+                        thisAM.AuditChangeType = 'PANext';
+                        thisAM.AuditContactId = idContact;
+                        thisAM.AuditReason = 'User Not Found in PANext';
+                        thisAM.ContactId = idContact;
+                        thisAM.PANextRole = 'removeTestCoordinator';
+                        thisAM.UpgradeRolesOnly = false;
+
+                        // If the user doesn't have an eMetric User Role, deactivate the ACR
+                        if (String.isEmpty(thisACR.eMetrics_Role__c)) {
+                            thisAM.Active = false;
+                            thisAM.Status = 'Inactive';
+                        }
+
+                        lstACRMVP.add(thisAM);
+                    }
+                }
+            }
+
+            // Process the ACR changes, if any
+            if (lstACRMVP.size() > 0) {
+                ACT_GEN_HierarchyFunctionsWithoutSharing.setACRAccess(lstACRMVP);
+            }
+        }
+        catch(Exception ex) {
+            //logging the exceptions occurred when the user try to log in.
+            system.debug('Exception occurred when logging in >>>>> ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', '', 'ACT_LoginFlowController encountered error', ex.getMessage(), '', '', '');
+        }
+
+        return completeLoginFlow();
+    }
+
+    private PageReference completeLoginFlow() {
+        system.debug('logged in ------------' + userinfo.getuserid());
+
+        try {
+            list<ACT_ComminityLoginSuccess__c> existingRecord = [
+                    SELECT
+                            Id,
+                            Name,
+                            Login_Access__c,
+                            SetupOwnerId
+                    FROM
+                            ACT_ComminityLoginSuccess__c
+                    WHERE
+                            SetupOwnerId = :userinfo.getuserid()
+            ];
+
+            system.debug('existingRecord------------' + existingRecord);
+
+            if (existingRecord.size() > 0) {
+                existingRecord[0].Login_Access__c = true;
+                update existingRecord[0];
+            }
+            else {
+                ACT_ComminityLoginSuccess__c newRecord = new ACT_ComminityLoginSuccess__c (
+                        SetupOwnerId = userinfo.getuserid(),
+                        Name = userinfo.getFirstName(),
+                        Login_Access__c = true);
+
+                insert newRecord;
+            }
+        }
+        catch (Exception ex) {
+            // Log error
+            system.debug('Exception occurred when logging in >>>>> ' + ex.getMessage() + ' Stack Dump: ' + ex.getStackTraceString());
+            CC_SC_ERR_EventLogger.LogSingleError(ex, null, 'Error', '', 'ACT_LoginFlowController completeLoginFlow', ex.getMessage(), '', '', '');
+        }
+
+        return Auth.SessionManagement.finishLoginFlow();
+    }
+}
